@@ -1,0 +1,80 @@
+name: QA — varredura noturna
+
+on:
+  schedule:
+    - cron: "0 6 * * *"  # 06:00 UTC = 03:00 BRT
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  full-qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: |
+            package-lock.json
+            sample-app/package-lock.json
+
+      - name: Install all
+        run: npm run install:all
+
+      - name: Build sample-app
+        run: npm --prefix sample-app run build
+
+      - name: Start dev server
+        run: |
+          npm --prefix sample-app run dev &
+          npx wait-on http://localhost:3000 -t 60000
+
+      - name: Run full suite
+        id: suite
+        run: npm run test:all
+        continue-on-error: true
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-nightly-report
+          path: playwright-report/
+          retention-days: 30
+
+      - name: Open issue se suite noturna falhou
+        if: steps.suite.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN: ${{ github.run_id }}
+        run: |
+          DATE=$(date -u +%Y-%m-%d)
+          TITLE="[QA-noturno] Suite falhou em $DATE"
+          BODY=$(cat <<EOF
+          A varredura noturna detectou falha na suite sem mudanças recentes no código —
+          provavelmente uma regressão de dependência ou ambiente.
+
+          - Run: https://github.com/$REPO/actions/runs/$RUN
+          - Investigar antes de abrir trabalho do dia.
+
+          _Aberta automaticamente pelo workflow \`qa-nightly.yml\`._
+          EOF
+          )
+          if gh issue list --label "bug,qa-nightly" --search "$DATE in:title" --state open --json number --jq "length" | grep -q "^0$"; then
+            gh issue create --title "$TITLE" --label "bug,qa-nightly" --body "$BODY"
+          fi
+
+      - name: Falhar workflow se suite falhou
+        if: steps.suite.outcome == 'failure'
+        run: exit 1

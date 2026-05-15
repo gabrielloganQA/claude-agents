@@ -1,0 +1,19 @@
+{
+  "name": "claude-agents",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Sistema multi-agente em Claude Code: QA, Dev, security, deps e docs",
+  "scripts": {
+    "dev": "npm --prefix sample-app run dev",
+    "build": "npm --prefix sample-app run build",
+    "start": "npm --prefix sample-app run start",
+    "test:web": "playwright test",
+    "test:api": "node --test tests/api/*.test.js",
+    "test:all": "npm run test:api && npm run test:web",
+    "watch": "node scripts/watch.js",
+    "install:all": "npm install && npm --prefix sample-app install && npx playwright install chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  }
+}

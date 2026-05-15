@@ -1,0 +1,18 @@
+# CODEOWNERS define quem é automaticamente solicitado para revisar PRs.
+# Sintaxe: <padrão de arquivo>   <@usuário-ou-time>
+# Docs: https://docs.github.com/en/repositories/managing-your-repositories-settings-and-customizations/customizing-your-repository/about-code-owners
+
+# Owner padrão de tudo
+*                       @logangaabriel
+
+# Configuração dos agentes — mudanças aqui afetam todo o time, revisão é crítica
+/.claude/agents/        @logangaabriel
+/.claude/commands/      @logangaabriel
+/.claude/settings.json  @logangaabriel
+
+# Workflows de CI — segurança da pipeline
+/.github/workflows/     @logangaabriel
+
+# Documentação do time
+/AGENTS.md              @logangaabriel
+/docs/                  @logangaabriel
