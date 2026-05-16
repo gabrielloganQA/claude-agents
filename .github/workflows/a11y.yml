@@ -40,6 +40,11 @@ jobs:
           mkdir -p /tmp/dev-logs
           nohup setsid npm --prefix sample-app run dev > /tmp/dev-logs/server.log 2>&1 < /dev/null &
           npx wait-on http://localhost:3000 -t 60000
+          curl -sf http://localhost:3000 > /dev/null && echo "✓ dev vivo"
+
+      - name: Confirma que dev server sobreviveu
+        run: |
+          curl -sf http://localhost:3000 > /dev/null && echo "✓ dev ainda vivo" || (echo "✗ dev morreu" && tail -50 /tmp/dev-logs/server.log && exit 1)
 
       - name: Run a11y tests
         id: a11y

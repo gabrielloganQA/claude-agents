@@ -31,15 +31,37 @@ jobs:
           npm --prefix sample-app install
           npm install --no-save c8
 
-      - name: Start dev server (detached)
+      - name: Start dev server com NODE_V8_COVERAGE
         run: |
-          mkdir -p /tmp/dev-logs
-          nohup setsid npm --prefix sample-app run dev > /tmp/dev-logs/server.log 2>&1 < /dev/null &
+          # NODE_V8_COVERAGE faz o V8 escrever coverage do servidor em disco,
+          # permitindo medirmos código que roda no processo separado do Next.
+          mkdir -p /tmp/dev-logs coverage-tmp
+          NODE_V8_COVERAGE=$(pwd)/coverage-tmp \
+            nohup setsid npm --prefix sample-app run dev > /tmp/dev-logs/server.log 2>&1 < /dev/null &
           npx wait-on http://localhost:3000 -t 60000
+          curl -sf http://localhost:3000/api/todos > /dev/null && echo "✓ dev vivo"
 
-      - name: Run API tests with coverage
+      - name: Confirma que dev server sobreviveu
         run: |
-          npx c8 \
+          curl -sf http://localhost:3000/api/todos > /dev/null && echo "✓ dev ainda vivo" || (echo "✗ dev morreu" && tail -50 /tmp/dev-logs/server.log && exit 1)
+
+      - name: Run API tests
+        id: tests
+        run: node --test tests/api/*.test.js
+        continue-on-error: true
+
+      - name: Termina dev server pra flush do coverage
+        if: always()
+        run: |
+          pkill -TERM -f "next dev" 2>/dev/null || true
+          sleep 3
+          ls -la coverage-tmp/ | head -10 || true
+
+      - name: Gera relatório de coverage
+        if: always()
+        run: |
+          npx c8 report \
+            --temp-directory=coverage-tmp \
             --reporter=json-summary \
             --reporter=text \
             --reporter=lcov \
@@ -47,8 +69,7 @@ jobs:
             --exclude='**/node_modules/**' \
             --exclude='**/*.test.js' \
             --exclude='**/*.spec.js' \
-            --report-dir=coverage \
-            node --test tests/api/*.test.js
+            --report-dir=coverage
 
       - name: Upload coverage report
         if: always()
@@ -58,8 +79,12 @@ jobs:
           path: coverage/
           retention-days: 14
 
+      - name: Falhar workflow se testes falharam
+        if: steps.tests.outcome == 'failure'
+        run: exit 1
+
       - name: Post coverage summary as PR comment
-        if: github.event_name == 'pull_request'
+        if: always() && github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.number }}

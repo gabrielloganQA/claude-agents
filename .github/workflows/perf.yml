@@ -45,6 +45,11 @@ jobs:
           mkdir -p /tmp/prod-logs
           nohup setsid npm --prefix sample-app run start > /tmp/prod-logs/server.log 2>&1 < /dev/null &
           npx wait-on http://localhost:3000 -t 60000
+          curl -sf http://localhost:3000 > /dev/null && echo "✓ prod vivo"
+
+      - name: Confirma que prod server sobreviveu
+        run: |
+          curl -sf http://localhost:3000 > /dev/null && echo "✓ prod ainda vivo" || (echo "✗ prod morreu" && tail -50 /tmp/prod-logs/server.log && exit 1)
 
       - name: Run Lighthouse (3x cada rota, mediana)
         run: |
