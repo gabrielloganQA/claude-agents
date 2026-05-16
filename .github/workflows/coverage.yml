@@ -88,12 +88,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
+        continue-on-error: true
         run: |
+          set -e
           if [ ! -f coverage/coverage-summary.json ]; then
-            echo "coverage-summary.json não encontrado"
+            echo "coverage-summary.json não encontrado — nada a comentar"
             exit 0
           fi
-          BODY=$(python3 -c "
+          # gera o BODY num arquivo via python (sem heredoc inline pra evitar indent issues)
+          python3 > /tmp/comment.md <<'PYEOF'
           import json
           with open('coverage/coverage-summary.json') as f:
               d = json.load(f)
@@ -106,14 +109,8 @@ jobs:
               m = t[k]
               pct = m['pct']
               emoji = '✅' if pct >= 80 else ('⚠️' if pct >= 60 else '❌')
-              print(f'| {k.capitalize()} | {emoji} {pct}% | {m[\"covered\"]} / {m[\"total\"]} |')
+              print(f'| {k.capitalize()} | {emoji} {pct}% | {m["covered"]} / {m["total"]} |')
           print('')
           print('_Relatório detalhado nos artifacts do workflow._')
-          ")
-          # apaga comentários antigos do mesmo bot pra evitar spam
-          gh pr view "$PR" --json comments --jq '.comments[] | select(.author.login=="github-actions[bot]") | select(.body | startswith("## 📊 Cobertura de testes")) | .url' \
-            | while read url; do
-                comment_id=$(echo "$url" | sed 's/.*#issuecomment-//')
-                gh api -X DELETE "repos/${{ github.repository }}/issues/comments/$comment_id" 2>/dev/null || true
-              done
-          gh pr comment "$PR" --body "$BODY"
+          PYEOF
+          gh pr comment "$PR" --body-file /tmp/comment.md || echo "falha ao comentar (ok, segue)"

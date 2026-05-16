@@ -64,6 +64,20 @@ jobs:
         run: npm run test:web
         continue-on-error: true
 
+      - name: Debug — emite anotações com outcomes e logs
+        if: always()
+        run: |
+          esc() { sed -e 's/%/%25/g' -e ':a' -e 'N' -e '$!ba' -e 's/\n/%0A/g' -e 's/\r/%0D/g'; }
+          echo "::notice title=outcomes::API=${{ steps.api.outcome }} Web=${{ steps.web.outcome }}"
+          DEV_LOG=$(tail -40 /tmp/dev-logs/server.log 2>/dev/null | head -c 2000 | esc)
+          echo "::notice title=dev_server_tail::$DEV_LOG"
+          for f in $(find test-results -type f -name "*.md" 2>/dev/null | head -3); do
+            CONTENT=$(head -c 1500 "$f" | esc)
+            echo "::error file=$f,title=playwright_failure::$CONTENT"
+          done
+          echo "=== sanity ==="
+          curl -s http://localhost:3000/api/todos || echo "dev down"
+
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v4
