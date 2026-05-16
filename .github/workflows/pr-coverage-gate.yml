@@ -1,0 +1,188 @@
+name: PR coverage gate — delta de cobertura
+
+# Em toda PR: calcula quantas linhas foram ADICIONADAS no diff vs main
+# e quantas dessas linhas estão cobertas por testes. Comenta na PR
+# sugerindo `/pre-pr-check` se a cobertura do delta for baixa.
+#
+# Não falha o CI por enquanto (modo informativo). Quando o time tiver
+# baseline saudável, descomente o step "Falha se delta coverage <60%".
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  delta-coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # precisa de histórico pra diff vs main
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install deps
+        run: |
+          npm install
+          npm --prefix sample-app install
+          npm install --no-save c8
+
+      - name: Detecta arquivos modificados (não-deletados)
+        id: diff
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # arquivos de produção (não testes) modificados
+          CHANGED=$(git diff --diff-filter=AM --name-only "$BASE_SHA"...HEAD \
+            | grep -E '\.(js|jsx|ts|tsx)$' \
+            | grep -v '\.test\.\|\.spec\.\|/node_modules/\|/tests/' || true)
+          if [ -z "$CHANGED" ]; then
+            echo "Nenhum arquivo de produção modificado — sem cobertura pra checar."
+            echo "changed=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          echo "Arquivos modificados:"
+          echo "$CHANGED"
+          # salva como linha única separada por espaço
+          echo "changed=$(echo $CHANGED | tr '\n' ' ')" >> $GITHUB_OUTPUT
+
+      - name: Pula se sem arquivos de produção
+        if: steps.diff.outputs.changed == ''
+        run: echo "ok"
+
+      - name: Start dev server com NODE_V8_COVERAGE
+        if: steps.diff.outputs.changed != ''
+        run: |
+          mkdir -p /tmp/dev-logs coverage-tmp
+          NODE_V8_COVERAGE=$(pwd)/coverage-tmp \
+            nohup setsid npm --prefix sample-app run dev > /tmp/dev-logs/server.log 2>&1 < /dev/null &
+          npx wait-on http://localhost:3000 -t 60000
+          curl -sf http://localhost:3000/api/todos > /dev/null && echo "✓"
+
+      - name: Roda testes
+        if: steps.diff.outputs.changed != ''
+        run: node --test tests/api/*.test.js
+        continue-on-error: true
+
+      - name: Termina dev pra flush do coverage
+        if: steps.diff.outputs.changed != ''
+        run: |
+          pkill -TERM -f "next dev" 2>/dev/null || true
+          sleep 3
+
+      - name: Gera relatório c8
+        if: steps.diff.outputs.changed != ''
+        run: |
+          npx c8 report \
+            --temp-directory=coverage-tmp \
+            --reporter=lcov \
+            --reporter=json-summary \
+            --include='sample-app/app/**' \
+            --report-dir=coverage || true
+
+      - name: Calcula delta cobertura e comenta
+        if: steps.diff.outputs.changed != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          CHANGED: ${{ steps.diff.outputs.changed }}
+        continue-on-error: true
+        run: |
+          python3 > /tmp/delta-report.md <<'PYEOF'
+          import os, subprocess, re
+          import pathlib
+
+          changed = os.environ.get('CHANGED','').split()
+          base = os.environ['BASE_SHA']
+
+          # Parse coverage/lcov.info pra saber quais linhas estão cobertas por arquivo
+          covered = {}  # path → set(linhas cobertas)
+          lcov = pathlib.Path('coverage/lcov.info')
+          if lcov.exists():
+              cur = None
+              for line in lcov.read_text().splitlines():
+                  if line.startswith('SF:'):
+                      cur = line[3:]
+                      covered[cur] = set()
+                  elif line.startswith('DA:') and cur:
+                      lineno, hits = line[3:].split(',')
+                      if int(hits) > 0:
+                          covered[cur].add(int(lineno))
+
+          # Pra cada arquivo modificado, pega linhas adicionadas (+) no diff
+          total_added = 0
+          total_covered = 0
+          per_file = []
+          for f in changed:
+              # listas linhas adicionadas usando git diff --unified=0
+              try:
+                  diff = subprocess.check_output(
+                      ['git','diff','--unified=0',f'{base}...HEAD','--',f],
+                      text=True)
+              except subprocess.CalledProcessError:
+                  continue
+              added_lines = set()
+              cur_new_line = None
+              for line in diff.splitlines():
+                  m = re.match(r'^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@', line)
+                  if m:
+                      cur_new_line = int(m.group(1))
+                      continue
+                  if line.startswith('+') and not line.startswith('+++'):
+                      if cur_new_line is not None:
+                          added_lines.add(cur_new_line)
+                      cur_new_line = (cur_new_line or 0) + 1
+                  elif line.startswith(' '):
+                      cur_new_line = (cur_new_line or 0) + 1
+              # match com cobertura
+              # lcov usa path absoluto, então tenta find
+              full_paths = [k for k in covered if k.endswith(f) or k.endswith('/'+f)]
+              cov_lines = set()
+              for fp in full_paths:
+                  cov_lines |= covered.get(fp, set())
+              cov_in_added = added_lines & cov_lines
+              total_added += len(added_lines)
+              total_covered += len(cov_in_added)
+              pct = (len(cov_in_added) / len(added_lines) * 100) if added_lines else 100
+              emoji = '✅' if pct >= 70 else ('⚠️' if pct >= 40 else '❌')
+              per_file.append(f'- {emoji} `{f}`: {len(cov_in_added)}/{len(added_lines)} ({pct:.0f}%)')
+
+          total_pct = (total_covered / total_added * 100) if total_added else 100
+          overall_emoji = '✅' if total_pct >= 70 else ('⚠️' if total_pct >= 40 else '❌')
+
+          print(f'## 🎯 Cobertura do diff (linhas novas)')
+          print()
+          print(f'**{overall_emoji} {total_covered}/{total_added} linhas cobertas ({total_pct:.0f}%)**')
+          print()
+          if total_pct < 70:
+              print(f'💡 Sugestão: rode `/pre-pr-check` ou `/qa-pre-pr` no Claude Code')
+              print(f'pra gerar testes pras linhas novas antes do merge.')
+              print()
+          print('### Por arquivo')
+          for line in per_file:
+              print(line)
+          print()
+          print(f'_Threshold informativo: 70%. Não bloqueia merge atualmente._')
+          PYEOF
+
+          if [ -s /tmp/delta-report.md ]; then
+            gh pr comment "$PR" --body-file /tmp/delta-report.md || echo "(falha ao comentar)"
+          fi
+
+      # Quando time tiver baseline saudável (60%+ no delta consistente),
+      # descomente pra bloquear regressões:
+      #
+      # - name: Falha se delta coverage < 60%
+      #   if: ...
+      #   run: exit 1
