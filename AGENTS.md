@@ -4,11 +4,14 @@ Este projeto traz uma frota de agentes Claude Code que cobrem o ciclo de qualida
 
 | Agente             | Função                                                              |
 | ------------------ | ------------------------------------------------------------------- |
-| **qa-tester**      | Roda suite (web+API), abre GitHub Issues para cada bug.             |
+| **qa-tester**      | Roda suite (web+API), abre GitHub Issues para cada bug (regressão). |
+| **qa-explorer**    | Gera testes para cenários ainda não cobertos usando metodologias formais (boundary, decision table, mutation, etc.). Abre issues + PRs. |
 | **dev-fixer**      | Pega issues do QA, corrige código, abre PR pra revisão humana.      |
 | **security-scanner** | Roda `npm audit` + SAST leve + busca secrets. Abre issues.        |
 | **dep-updater**    | Avalia PRs do Dependabot, roda suite, comenta recomendação.         |
 | **docs-writer**    | Mantém README/AGENTS/docs sincronizados com o código.               |
+
+> `qa-tester` mantém a base estável (regressão). `qa-explorer` faz a base **crescer** descobrindo cenários novos com técnicas de caixa branca + caixa preta (ver `docs/TESTING-METHODOLOGIES.md`).
 
 Toda PR aberta por agentes passa por **revisão humana** antes do merge — esse é o gate de qualidade não-negociável.
 
@@ -35,6 +38,8 @@ gh auth login
 | `/qa-run`          | qa-tester            | Roda toda a suite, abre 1 issue por bug encontrado.                    |
 | `/qa-run --apenas-api` | qa-tester        | Só API.                                                                |
 | `/qa-run --apenas-web` | qa-tester        | Só Playwright.                                                         |
+| `/qa-explore`      | qa-explorer          | Gera 5-10 testes para cenários não cobertos. Bug → issue. Valioso → PR adicionando ao suite. |
+| `/qa-explore <area>` | qa-explorer        | Foca a exploração numa área (ex: `/qa-explore api/todos POST`).        |
 | `/dev-fix [N]`     | dev-fixer            | Corrige issue #N (ou a mais antiga) e abre PR.                         |
 | `/verify <PR#>`    | qa-tester (verify)   | Roda suite contra a branch da PR, comenta resultado.                   |
 | `/security-scan`   | security-scanner     | Auditoria de segurança (audit + secrets + SAST).                       |
