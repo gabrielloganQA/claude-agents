@@ -1,0 +1,91 @@
+name: Mutation — qualidade da suite
+
+# Mutation testing é lento (10-60min). Rodamos só semanalmente e on-demand,
+# não em todo push/PR. Pra rodar manual: Actions tab → Run workflow.
+
+on:
+  schedule:
+    - cron: "0 8 * * 0"  # todo domingo 08:00 UTC (05:00 BRT)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  mutation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install deps
+        run: |
+          npm install
+          npm --prefix sample-app install
+          npm install --no-save @stryker-mutator/core
+
+      - name: Start dev server (detached)
+        run: |
+          mkdir -p /tmp/dev-logs
+          nohup setsid npm --prefix sample-app run dev > /tmp/dev-logs/server.log 2>&1 < /dev/null &
+          npx wait-on http://localhost:3000 -t 60000
+
+      - name: Run mutation testing
+        id: mutation
+        run: npx stryker run
+        continue-on-error: true
+
+      - name: Upload mutation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-report
+          path: mutation-report/
+          retention-days: 60
+
+      - name: Garantir label mutation
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create "mutation" --color "fbca04" --description "Qualidade da suite (mutation testing)" 2>/dev/null || true
+
+      - name: Resumir score na issue semanal
+        if: steps.mutation.outcome == 'success' || steps.mutation.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN: ${{ github.run_id }}
+        run: |
+          if [ ! -f mutation-report/mutation.json ]; then
+            echo "Stryker não gerou mutation.json"
+            exit 0
+          fi
+          SCORE=$(python3 -c "
+          import json
+          with open('mutation-report/mutation.json') as f: d=json.load(f)
+          print(d.get('thresholds',{}).get('mutationScore','?'))
+          " 2>/dev/null || echo "?")
+          DATE=$(date -u +%Y-%m-%d)
+          TITLE="[Mutation] Score semanal $DATE"
+          BODY="## Mutation testing — relatório semanal
+
+          - Score: \`$SCORE\`
+          - Detalhes: [run #$RUN](https://github.com/$REPO/actions/runs/$RUN)
+          - Relatório completo: artifact \`mutation-report\` deste run
+
+          ## Próximo passo
+          Se houver mutantes sobreviventes em código crítico, dev do time pode rodar \`/mutation-test\` no Claude Code para análise e PR fortalecendo testes.
+
+          _Aberta pelo workflow \`mutation.yml\`._"
+          gh issue create --title "$TITLE" --label "mutation" --body "$BODY"

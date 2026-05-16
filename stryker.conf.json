@@ -1,0 +1,24 @@
+{
+  "$schema": "https://unpkg.com/@stryker-mutator/core/schema/stryker-schema.json",
+  "_comment": "Mutation testing — ver docs/TESTING-METHODOLOGIES.md A.5 e .claude/agents/mutation-tester.md",
+  "packageManager": "npm",
+  "testRunner": "command",
+  "commandRunner": {
+    "command": "node --test tests/api/*.test.js"
+  },
+  "mutate": [
+    "sample-app/app/**/*.{js,jsx,ts,tsx}",
+    "!sample-app/app/**/*.test.js",
+    "!sample-app/app/**/*.spec.js"
+  ],
+  "reporters": ["progress", "clear-text", "html", "json"],
+  "htmlReporter": { "fileName": "mutation-report/index.html" },
+  "jsonReporter": { "fileName": "mutation-report/mutation.json" },
+  "thresholds": {
+    "high": 80,
+    "low": 60,
+    "break": null
+  },
+  "timeoutMS": 10000,
+  "concurrency": 2
+}
