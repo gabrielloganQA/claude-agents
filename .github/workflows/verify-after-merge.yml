@@ -1,0 +1,130 @@
+name: Verify — confirma resolução pós-merge
+
+# Quando uma PR é mergeada na main, este workflow:
+# 1. Identifica as issues que a PR fechou (Closes/Fixes/Resolves #N)
+# 2. Roda a suite completa contra main pós-merge
+# 3. Se tudo passou: comenta "✅ verificado" em cada issue fechada
+# 4. Se falhou: REABRE cada issue + comentário "regressão detectada"
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  verify:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Identifica issues fechadas pela PR
+        id: issues
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+          PR_NUM: ${{ github.event.pull_request.number }}
+        run: |
+          # Extrai todos os refs "Closes/Fixes/Resolves #N" do corpo da PR
+          # (a sintaxe do GitHub que fecha issues automaticamente).
+          ISSUES=$(echo "$BODY" | grep -oiE '(close[sd]?|fixe?[sd]?|resolve[sd]?)\s+#[0-9]+' | grep -oE '#[0-9]+' | tr -d '#' | sort -u | tr '\n' ' ')
+          if [ -z "$ISSUES" ]; then
+            echo "PR #$PR_NUM não fechou nenhuma issue via keyword — nada a verificar."
+            echo "issues=" >> $GITHUB_OUTPUT
+          else
+            echo "issues fechadas: $ISSUES"
+            echo "issues=$ISSUES" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install deps
+        if: steps.issues.outputs.issues != ''
+        run: |
+          npm install
+          npm --prefix sample-app install
+          npx playwright install --with-deps chromium
+
+      - name: Build sample-app
+        if: steps.issues.outputs.issues != ''
+        run: npm --prefix sample-app run build
+
+      - name: Start dev server (detached)
+        if: steps.issues.outputs.issues != ''
+        run: |
+          mkdir -p /tmp/dev-logs
+          nohup setsid npm --prefix sample-app run dev > /tmp/dev-logs/server.log 2>&1 < /dev/null &
+          npx wait-on http://localhost:3000 -t 60000
+          curl -sf http://localhost:3000/api/todos > /dev/null
+
+      - name: Confirma server sobreviveu
+        if: steps.issues.outputs.issues != ''
+        run: curl -sf http://localhost:3000/api/todos > /dev/null
+
+      - name: Roda suite completa
+        if: steps.issues.outputs.issues != ''
+        id: suite
+        run: npm run test:all
+        continue-on-error: true
+
+      - name: Garante label "regression" existe
+        if: steps.suite.outcome == 'failure' && steps.issues.outputs.issues != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create "regression" --color "b60205" --description "Regressão pós-merge detectada" 2>/dev/null || true
+
+      - name: Comenta resultado em cada issue fechada
+        if: steps.issues.outputs.issues != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUM: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          RUN: ${{ github.run_id }}
+          REPO: ${{ github.repository }}
+          OUTCOME: ${{ steps.suite.outcome }}
+          ISSUES: ${{ steps.issues.outputs.issues }}
+        run: |
+          if [ "$OUTCOME" = "success" ]; then
+            MARK="✅"
+            STATUS="**verificado**"
+            ACTION_MSG="A suite completa passou em \`$(echo $SHA | cut -c1-7)\` (pós-merge). Resolução confirmada."
+          else
+            MARK="⚠️"
+            STATUS="**REGRESSÃO DETECTADA**"
+            ACTION_MSG="A suite falhou no commit \`$(echo $SHA | cut -c1-7)\` (pós-merge). Reabrindo issue."
+          fi
+
+          BODY=$(cat <<EOF
+          $MARK Verificação pós-merge: $STATUS
+
+          $ACTION_MSG
+
+          - PR resolvedora: #$PR_NUM
+          - Workflow: [run #$RUN](https://github.com/$REPO/actions/runs/$RUN)
+
+          _Comentado automaticamente pelo workflow \`verify-after-merge.yml\`._
+          EOF
+          )
+
+          for issue in $ISSUES; do
+            echo "→ Issue #$issue"
+            gh issue comment "$issue" --body "$BODY"
+            if [ "$OUTCOME" != "success" ]; then
+              # Reabre se a suite falhou (regressão)
+              gh issue reopen "$issue" || echo "(já estava aberta ou erro)"
+              gh issue edit "$issue" --add-label "regression" 2>/dev/null || true
+            fi
+          done
