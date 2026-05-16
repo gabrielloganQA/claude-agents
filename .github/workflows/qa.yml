@@ -64,20 +64,30 @@ jobs:
           path: playwright-report/
           retention-days: 14
 
-      - name: Open issue on failure (push only)
-        if: failure() || steps.api.outcome == 'failure' || steps.web.outcome == 'failure'
+      - name: Garantir labels necessários
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          EVENT: ${{ github.event_name }}
+        run: |
+          # idempotente — não falha se já existir
+          gh label create "qa-ci" --color "d73a4a" --description "Aberto pelo workflow CI" 2>/dev/null || true
+          gh label create "qa-found" --color "d73a4a" --description "Aberto pelo agente qa-tester" 2>/dev/null || true
+          gh label create "qa-nightly" --color "d73a4a" --description "Aberto pela varredura noturna" 2>/dev/null || true
+          gh label create "security" --color "b60205" --description "Achado de segurança" 2>/dev/null || true
+          gh label create "auto-update" --color "0e8a16" --description "PR/issue de atualização automática" 2>/dev/null || true
+          gh label create "major-upgrade" --color "fbca04" --description "Bump major de dependência" 2>/dev/null || true
+          gh label create "sample-app" --color "c5def5" --description "Mudança no app de exemplo" 2>/dev/null || true
+          gh label create "docs" --color "1d76db" --description "Mudança de documentação" 2>/dev/null || true
+
+      - name: Open issue on failure (push only)
+        if: (failure() || steps.api.outcome == 'failure' || steps.web.outcome == 'failure') && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REF: ${{ github.ref }}
           SHA: ${{ github.sha }}
           RUN: ${{ github.run_id }}
           REPO: ${{ github.repository }}
         run: |
-          if [ "$EVENT" != "push" ]; then
-            echo "Não é push para main — pulando criação de issue."
-            exit 1
-          fi
           TITLE="[QA-CI] Suite falhou em $(echo $SHA | cut -c1-7) ($(date -u +%Y-%m-%d))"
           BODY=$(cat <<EOF
           ## Resumo

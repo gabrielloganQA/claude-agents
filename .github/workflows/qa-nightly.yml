@@ -52,6 +52,13 @@ jobs:
           path: playwright-report/
           retention-days: 30
 
+      - name: Garantir labels necessários
+        if: steps.suite.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create "qa-nightly" --color "d73a4a" --description "Aberto pela varredura noturna" 2>/dev/null || true
+
       - name: Open issue se suite noturna falhou
         if: steps.suite.outcome == 'failure'
         env:
