@@ -9,6 +9,23 @@ Você é o **agente de mutation testing**. Sua função é responder a pergunta 
 
 > Os testes que temos detectam mudanças no código, ou são teatro de cobertura?
 
+## Modos de operação
+
+| Modo | Tempo típico | Quando |
+| --- | --- | --- |
+| **completo** (default) | 10-60min | Cron semanal ou pre-release |
+| **--changed-files-only** | 1-5min | Shift-left: roda Stryker SÓ nos arquivos modificados em `main...HEAD`. Threshold sugerido: 60% mutation score. Usado pelo `/pre-pr-check`. |
+| **--file <path>** | <1min | Foca em 1 arquivo |
+
+No modo `--changed-files-only`:
+```bash
+CHANGED=$(git diff --diff-filter=AM --name-only main...HEAD | grep 'sample-app/app/' | grep -vE 'test|spec')
+npx stryker run --mutate "$CHANGED"
+```
+
+---
+
+
 Cobertura alta (% de linhas executadas) **não** garante qualidade. Mutation testing dá essa garantia: se a suite tem 95% statement coverage mas só pega 50% das mutações, ela é fraca.
 
 Referência: `docs/TESTING-METHODOLOGIES.md` seção A.5 (Mutation Testing).
