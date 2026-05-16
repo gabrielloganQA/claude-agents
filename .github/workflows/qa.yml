@@ -68,24 +68,22 @@ jobs:
         run: npm run test:web
         continue-on-error: true
 
-      - name: Debug — outcomes e logs em caso de falha
+      - name: Debug — emite anotações com diagnóstico
         if: always()
         run: |
-          echo "=== outcomes ==="
-          echo "API: ${{ steps.api.outcome }}"
-          echo "Web: ${{ steps.web.outcome }}"
-          echo ""
-          echo "=== últimas linhas do dev server ==="
-          tail -80 /tmp/dev-logs/server.log || true
-          echo ""
-          echo "=== sanity check (estado atual) ==="
-          curl -s http://localhost:3000/api/todos || echo "dev server não responde mais"
-          echo ""
-          echo "=== test-results (Playwright) ==="
-          find test-results -type f -name "*.md" 2>/dev/null | head -5 | while read f; do
-            echo "--- $f ---"
-            cat "$f"
+          # ::error annotations ficam acessíveis via API pública,
+          # útil quando não temos auth pra baixar logs/artifacts.
+          esc() { sed -e 's/%/%25/g' -e ':a' -e 'N' -e '$!ba' -e 's/\n/%0A/g' -e 's/\r/%0D/g'; }
+          echo "::error title=outcomes::API=${{ steps.api.outcome }} Web=${{ steps.web.outcome }}"
+          DEV_LOG=$(tail -40 /tmp/dev-logs/server.log 2>/dev/null | head -c 2000 | esc)
+          echo "::error title=dev_server_tail::$DEV_LOG"
+          for f in $(find test-results -type f -name "*.md" 2>/dev/null | head -5); do
+            CONTENT=$(head -c 1500 "$f" | esc)
+            echo "::error file=$f,title=playwright_failure::$CONTENT"
           done
+          # também tenta dump dos logs de teste no console pra quem tem auth
+          echo "=== sanity ==="
+          curl -s http://localhost:3000/api/todos || echo "dev down"
 
       - name: Upload Playwright report
         if: always()
