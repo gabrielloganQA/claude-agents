@@ -41,11 +41,19 @@ export default function Home() {
   }
 
   async function toggle(id) {
+    // Optimistic update — atualiza UI imediatamente pra o checkbox refletir
+    // o estado novo antes do round-trip do fetch terminar. Sem isso, o
+    // controlled component force volta pro estado antigo entre o click e a
+    // resposta do servidor (Playwright check() não consegue lidar).
+    setTodos((curr) => curr.map((t) => (t.id === id ? { ...t, done: !t.done } : t)));
     await fetch(`/api/todos/${id}`, { method: "PATCH" });
+    // re-sync com o servidor (resolve edge case de toggles concorrentes)
     load();
   }
 
   async function remove(id) {
+    // Optimistic remove
+    setTodos((curr) => curr.filter((t) => t.id !== id));
     await fetch(`/api/todos/${id}`, { method: "DELETE" });
     load();
   }
