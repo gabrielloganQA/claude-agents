@@ -8,12 +8,9 @@ export async function GET() {
 export async function POST(req) {
   const body = await req.json().catch(() => ({}));
   const text = body?.text;
-  if (typeof text !== "string") {
-    return NextResponse.json({ error: "text é obrigatório" }, { status: 400 });
+  if (typeof text !== "string" || text.trim() === "") {
+    return NextResponse.json({ error: "text é obrigatório e não pode ser vazio" }, { status: 400 });
   }
   const todo = createTodo(text);
   return NextResponse.json({ todo }, { status: 201 });
 }
-
-// BUG #3 (proposital): /api/todos/reset não existe — quem chamar leva 404,
-// e a suite de testes tenta usar para isolar cenários.

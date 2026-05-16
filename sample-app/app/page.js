@@ -5,11 +5,10 @@ import { useEffect, useState } from "react";
 export default function Home() {
   const [todos, setTodos] = useState([]);
   const [text, setText] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [error, setError] = useState(null);
 
   async function load() {
-    setLoading(true);
     try {
       const r = await fetch("/api/todos");
       const data = await r.json();
@@ -17,7 +16,7 @@ export default function Home() {
     } catch (e) {
       setError(String(e));
     } finally {
-      setLoading(false);
+      setInitialLoading(false);
     }
   }
 
@@ -70,7 +69,7 @@ export default function Home() {
       </form>
 
       {error && <p style={{ color: "crimson" }} role="alert">{error}</p>}
-      {loading ? (
+      {initialLoading ? (
         <p>Carregando...</p>
       ) : (
         <ul data-testid="todo-list" style={{ marginTop: 24, padding: 0, listStyle: "none" }}>
