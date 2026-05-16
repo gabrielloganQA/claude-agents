@@ -1,0 +1,90 @@
+name: A11y — WCAG 2.1 AA
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 7 * * 1"  # toda segunda 07:00 UTC (04:00 BRT)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  a11y:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install deps
+        run: |
+          npm install
+          npm --prefix sample-app install
+          npm install --no-save @axe-core/playwright @playwright/test
+          npx playwright install --with-deps chromium
+
+      - name: Start dev server (detached)
+        run: |
+          mkdir -p /tmp/dev-logs
+          nohup setsid npm --prefix sample-app run dev > /tmp/dev-logs/server.log 2>&1 < /dev/null &
+          npx wait-on http://localhost:3000 -t 60000
+
+      - name: Run a11y tests
+        id: a11y
+        run: npx playwright test tests/a11y/
+        continue-on-error: true
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a11y-report
+          path: playwright-report/
+          retention-days: 14
+
+      - name: Garantir label a11y
+        if: steps.a11y.outcome == 'failure' && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create "a11y" --color "5319e7" --description "Acessibilidade — violações WCAG" 2>/dev/null || true
+
+      - name: Abrir issue se a11y regrediu em push pra main
+        if: steps.a11y.outcome == 'failure' && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ github.sha }}
+          RUN: ${{ github.run_id }}
+          REPO: ${{ github.repository }}
+        run: |
+          TITLE="[A11y] Violações WCAG 2.1 AA detectadas em $(echo $SHA | cut -c1-7)"
+          BODY=$(cat <<EOF
+          ## Violações de acessibilidade
+
+          A suite a11y falhou no commit \`$SHA\`. Veja [run #$RUN](https://github.com/$REPO/actions/runs/$RUN) para detalhes.
+
+          ## Próximo passo
+          Um membro do time pode rodar \`/a11y-check\` no Claude Code para auditoria detalhada e abertura de issues específicas por categoria.
+
+          _Aberta pelo workflow \`a11y.yml\`._
+          EOF
+          )
+          if gh issue list --label "a11y,qa-found" --search "$SHA in:title" --state open --json number --jq "length" | grep -q "^0$"; then
+            gh issue create --title "$TITLE" --label "a11y,qa-found,bug" --body "$BODY"
+          fi
+
+      - name: Falhar workflow se a11y falhou
+        if: steps.a11y.outcome == 'failure'
+        run: exit 1
