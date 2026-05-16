@@ -1,0 +1,153 @@
+name: Perf — Core Web Vitals (Lighthouse)
+
+# Performance é sensível a variância — rodar em todo push/PR gera ruído.
+# Rodamos nightly contra main, com 3 execuções e mediana.
+
+on:
+  schedule:
+    - cron: "0 9 * * *"  # todo dia 09:00 UTC (06:00 BRT)
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - "sample-app/**"
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  perf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install deps
+        run: |
+          npm install
+          npm --prefix sample-app install
+          npm install --no-save lighthouse
+
+      - name: Build sample-app
+        run: npm --prefix sample-app run build
+
+      - name: Start production server (detached)
+        run: |
+          mkdir -p /tmp/prod-logs
+          nohup setsid npm --prefix sample-app run start > /tmp/prod-logs/server.log 2>&1 < /dev/null &
+          npx wait-on http://localhost:3000 -t 60000
+
+      - name: Run Lighthouse (3x cada rota, mediana)
+        run: |
+          mkdir -p perf-reports
+          ROUTES=("/")  # adicionar conforme app cresce
+          for route in "${ROUTES[@]}"; do
+            slug=$(echo "$route" | tr '/' '_' | sed 's/^_//; s/_$//')
+            [ -z "$slug" ] && slug="root"
+            for i in 1 2 3; do
+              npx lighthouse "http://localhost:3000$route" \
+                --output=json \
+                --output-path="perf-reports/${slug}-${i}.json" \
+                --chrome-flags="--headless --no-sandbox" \
+                --only-categories=performance \
+                --quiet || true
+            done
+          done
+
+      - name: Compara com baseline e comenta resultado
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          python3 <<'PYEOF'
+          import json, os, glob, statistics, subprocess
+          import pathlib
+
+          REPORTS = pathlib.Path('perf-reports')
+          BASELINE = pathlib.Path('perf-baseline')
+          BASELINE.mkdir(exist_ok=True)
+
+          # agrupa runs por rota e calcula mediana
+          medians = {}
+          for f in sorted(REPORTS.glob('*-*.json')):
+              slug = f.stem.rsplit('-',1)[0]
+              with open(f) as fh: d = json.load(fh)
+              audits = d.get('audits', {})
+              metrics = {
+                  'LCP':  audits.get('largest-contentful-paint',{}).get('numericValue'),
+                  'FCP':  audits.get('first-contentful-paint',{}).get('numericValue'),
+                  'CLS':  audits.get('cumulative-layout-shift',{}).get('numericValue'),
+                  'TBT':  audits.get('total-blocking-time',{}).get('numericValue'),
+                  'TTI':  audits.get('interactive',{}).get('numericValue'),
+                  'SI':   audits.get('speed-index',{}).get('numericValue'),
+                  'Score': (d.get('categories',{}).get('performance',{}).get('score') or 0) * 100,
+              }
+              medians.setdefault(slug, []).append(metrics)
+
+          summary = ['## ⚡ Performance (Lighthouse)\n']
+          regressions = []
+          for slug, runs in medians.items():
+              median = {}
+              for k in runs[0]:
+                  vals = [r[k] for r in runs if r[k] is not None]
+                  median[k] = statistics.median(vals) if vals else None
+              # baseline
+              base_file = BASELINE / f'{slug}.json'
+              if not base_file.exists():
+                  with open(base_file,'w') as fh: json.dump(median, fh, indent=2)
+                  summary.append(f'\n### `{slug}` — baseline criado (1ª execução)\n')
+                  for k,v in median.items():
+                      summary.append(f'- {k}: `{round(v,1) if v else "?"}`')
+                  continue
+              with open(base_file) as fh: base = json.load(fh)
+              summary.append(f'\n### Rota: `{slug}`\n')
+              summary.append('| Métrica | Baseline | Atual | Δ |')
+              summary.append('| --- | --- | --- | --- |')
+              for k,v in median.items():
+                  b = base.get(k)
+                  if v is None or b is None:
+                      summary.append(f'| {k} | `?` | `{round(v,1) if v else "?"}` | — |')
+                      continue
+                  delta_pct = ((v-b)/b*100) if b else 0
+                  emoji = '🟢' if delta_pct < -5 else ('🟡' if abs(delta_pct) < 10 else '🔴')
+                  summary.append(f'| {k} | `{round(b,1)}` | `{round(v,1)}` | {emoji} {delta_pct:+.1f}% |')
+                  # regressão flag
+                  is_worse = (k != 'Score' and delta_pct > 10) or (k == 'Score' and delta_pct < -5)
+                  if is_worse:
+                      regressions.append(f'{slug} {k}: {round(b,1)} → {round(v,1)} ({delta_pct:+.1f}%)')
+
+          body = '\n'.join(summary)
+          if regressions:
+              body += '\n\n## 🔴 Regressões detectadas\n' + '\n'.join(f'- {r}' for r in regressions)
+
+          print(body)
+
+          # Posta comentário se for PR
+          if os.environ.get('EVENT') == 'pull_request' and os.environ.get('PR'):
+              subprocess.run(['gh','pr','comment',os.environ['PR'],'--body',body], check=False)
+
+          # Abre issue se for cron e tem regressão
+          if os.environ.get('EVENT') == 'schedule' and regressions:
+              subprocess.run(['gh','label','create','perf','--color','c5def5','--description','Performance'], check=False, stderr=subprocess.DEVNULL)
+              from datetime import datetime
+              title = f'[Perf] Regressão Core Web Vitals em {datetime.utcnow().strftime("%Y-%m-%d")}'
+              subprocess.run(['gh','issue','create','--title',title,'--label','perf,bug','--body',body], check=False)
+          PYEOF
+
+      - name: Upload Lighthouse reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lighthouse-reports
+          path: perf-reports/
+          retention-days: 30

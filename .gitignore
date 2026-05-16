@@ -6,6 +6,9 @@ build/
 coverage/
 playwright-report/
 test-results/
+perf-reports/
+mutation-report/
+.stryker-tmp/
 .env
 .env.local
 .env*.local
