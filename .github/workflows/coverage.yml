@@ -1,0 +1,94 @@
+name: Coverage — cobertura de testes
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install deps
+        run: |
+          npm install
+          npm --prefix sample-app install
+          npm install --no-save c8
+
+      - name: Start dev server (detached)
+        run: |
+          mkdir -p /tmp/dev-logs
+          nohup setsid npm --prefix sample-app run dev > /tmp/dev-logs/server.log 2>&1 < /dev/null &
+          npx wait-on http://localhost:3000 -t 60000
+
+      - name: Run API tests with coverage
+        run: |
+          npx c8 \
+            --reporter=json-summary \
+            --reporter=text \
+            --reporter=lcov \
+            --include='sample-app/app/**' \
+            --exclude='**/node_modules/**' \
+            --exclude='**/*.test.js' \
+            --exclude='**/*.spec.js' \
+            --report-dir=coverage \
+            node --test tests/api/*.test.js
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 14
+
+      - name: Post coverage summary as PR comment
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if [ ! -f coverage/coverage-summary.json ]; then
+            echo "coverage-summary.json não encontrado"
+            exit 0
+          fi
+          BODY=$(python3 -c "
+          import json
+          with open('coverage/coverage-summary.json') as f:
+              d = json.load(f)
+          t = d['total']
+          print('## 📊 Cobertura de testes')
+          print('')
+          print('| Métrica | % | Coberto / Total |')
+          print('| --- | --- | --- |')
+          for k in ['statements','branches','functions','lines']:
+              m = t[k]
+              pct = m['pct']
+              emoji = '✅' if pct >= 80 else ('⚠️' if pct >= 60 else '❌')
+              print(f'| {k.capitalize()} | {emoji} {pct}% | {m[\"covered\"]} / {m[\"total\"]} |')
+          print('')
+          print('_Relatório detalhado nos artifacts do workflow._')
+          ")
+          # apaga comentários antigos do mesmo bot pra evitar spam
+          gh pr view "$PR" --json comments --jq '.comments[] | select(.author.login=="github-actions[bot]") | select(.body | startswith("## 📊 Cobertura de testes")) | .url' \
+            | while read url; do
+                comment_id=$(echo "$url" | sed 's/.*#issuecomment-//')
+                gh api -X DELETE "repos/${{ github.repository }}/issues/comments/$comment_id" 2>/dev/null || true
+              done
+          gh pr comment "$PR" --body "$BODY"
