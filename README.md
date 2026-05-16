@@ -1,7 +1,7 @@
 # claude-agents
 
-[![QA](https://github.com/logangaabriel/claude-agents/actions/workflows/qa.yml/badge.svg)](https://github.com/logangaabriel/claude-agents/actions/workflows/qa.yml)
-[![QA nightly](https://github.com/logangaabriel/claude-agents/actions/workflows/qa-nightly.yml/badge.svg)](https://github.com/logangaabriel/claude-agents/actions/workflows/qa-nightly.yml)
+[![QA](https://github.com/gabrielloganQA/claude-agents/actions/workflows/qa.yml/badge.svg)](https://github.com/gabrielloganQA/claude-agents/actions/workflows/qa.yml)
+[![QA nightly](https://github.com/gabrielloganQA/claude-agents/actions/workflows/qa-nightly.yml/badge.svg)](https://github.com/gabrielloganQA/claude-agents/actions/workflows/qa-nightly.yml)
 
 > Sistema multi-agente em Claude Code para QA + correção + segurança + deps + docs.
 

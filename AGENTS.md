@@ -17,7 +17,7 @@ Toda PR aberta por agentes passa por **revisão humana** antes do merge — esse
 ## 1. Setup (uma vez por pessoa)
 
 ```bash
-git clone git@github.com:logangaabriel/claude-agents.git
+git clone git@github.com:gabrielloganQA/claude-agents.git
 cd claude-agents
 npm run install:all     # raiz + sample-app + Chromium
 

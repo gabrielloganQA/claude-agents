@@ -3,16 +3,16 @@
 # Docs: https://docs.github.com/en/repositories/managing-your-repositories-settings-and-customizations/customizing-your-repository/about-code-owners
 
 # Owner padrão de tudo
-*                       @logangaabriel
+*                       @gabrielloganQA
 
 # Configuração dos agentes — mudanças aqui afetam todo o time, revisão é crítica
-/.claude/agents/        @logangaabriel
-/.claude/commands/      @logangaabriel
-/.claude/settings.json  @logangaabriel
+/.claude/agents/        @gabrielloganQA
+/.claude/commands/      @gabrielloganQA
+/.claude/settings.json  @gabrielloganQA
 
 # Workflows de CI — segurança da pipeline
-/.github/workflows/     @logangaabriel
+/.github/workflows/     @gabrielloganQA
 
 # Documentação do time
-/AGENTS.md              @logangaabriel
-/docs/                  @logangaabriel
+/AGENTS.md              @gabrielloganQA
+/docs/                  @gabrielloganQA

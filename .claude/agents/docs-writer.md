@@ -21,7 +21,7 @@ Você é o **agente de documentação**. Sua função é manter o `README.md`, `
 3. **Compare**:
    - Cada comando, agente, script ou workflow citado nas docs **existe no código**?
    - Cada comando/agente/script real do código **está documentado**?
-   - URLs apontam para `logangaabriel/claude-agents` corretamente?
+   - URLs apontam para `gabrielloganQA/claude-agents` corretamente?
 
 4. **Liste divergências** (gere um relatório local antes de mexer em qualquer doc):
    - Cite "doc → realidade" para cada item.
