@@ -41,10 +41,22 @@ jobs:
       - name: Build sample-app
         run: npm --prefix sample-app run build
 
-      - name: Start dev server
+      - name: Start dev server (detached)
         run: |
-          npm --prefix sample-app run dev &
+          # nohup + setsid mantém o processo vivo após o step terminar.
+          # GitHub Actions envia SIGHUP entre steps para processos filhos da shell.
+          mkdir -p /tmp/dev-logs
+          nohup setsid npm --prefix sample-app run dev > /tmp/dev-logs/server.log 2>&1 < /dev/null &
+          echo $! > /tmp/dev-logs/server.pid
+          # espera até a porta responder
           npx wait-on http://localhost:3000 -t 60000
+          # confirma que está realmente vivo após o background (sanity check)
+          curl -sf http://localhost:3000/api/todos > /tmp/dev-logs/sanity.json
+          echo "✓ dev server respondendo: $(cat /tmp/dev-logs/sanity.json)"
+
+      - name: Confirma que dev server sobreviveu ao step
+        run: |
+          curl -sf http://localhost:3000/api/todos > /dev/null && echo "✓ dev ainda vivo" || (echo "✗ dev morreu" && tail -50 /tmp/dev-logs/server.log && exit 1)
 
       - name: Run API tests
         id: api
