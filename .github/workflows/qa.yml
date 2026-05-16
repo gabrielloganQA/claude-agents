@@ -68,6 +68,25 @@ jobs:
         run: npm run test:web
         continue-on-error: true
 
+      - name: Debug — outcomes e logs em caso de falha
+        if: always()
+        run: |
+          echo "=== outcomes ==="
+          echo "API: ${{ steps.api.outcome }}"
+          echo "Web: ${{ steps.web.outcome }}"
+          echo ""
+          echo "=== últimas linhas do dev server ==="
+          tail -80 /tmp/dev-logs/server.log || true
+          echo ""
+          echo "=== sanity check (estado atual) ==="
+          curl -s http://localhost:3000/api/todos || echo "dev server não responde mais"
+          echo ""
+          echo "=== test-results (Playwright) ==="
+          find test-results -type f -name "*.md" 2>/dev/null | head -5 | while read f; do
+            echo "--- $f ---"
+            cat "$f"
+          done
+
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v4
