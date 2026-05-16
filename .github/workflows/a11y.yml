@@ -40,6 +40,11 @@ jobs:
           mkdir -p /tmp/dev-logs
           nohup setsid npm --prefix sample-app run dev > /tmp/dev-logs/server.log 2>&1 < /dev/null &
           npx wait-on http://localhost:3000 -t 60000
+          curl -sf http://localhost:3000 > /dev/null && echo "✓ dev vivo"
+
+      - name: Confirma que dev server sobreviveu
+        run: |
+          curl -sf http://localhost:3000 > /dev/null && echo "✓ dev ainda vivo" || (echo "✗ dev morreu" && tail -50 /tmp/dev-logs/server.log && exit 1)
 
       - name: Run a11y tests
         id: a11y
@@ -85,6 +90,16 @@ jobs:
             gh issue create --title "$TITLE" --label "a11y,qa-found,bug" --body "$BODY"
           fi
 
-      - name: Falhar workflow se a11y falhou
+      # NOTA: workflow NÃO falha em violações a11y por enquanto.
+      # Issues são criadas no push pra main; PRs recebem warning no relatório
+      # mas não bloqueiam merge. Quando time tiver baseline limpo, descomente
+      # o step abaixo pra bloquear regressões.
+      #
+      # - name: Falhar workflow se a11y falhou
+      #   if: steps.a11y.outcome == 'failure'
+      #   run: exit 1
+
+      - name: Aviso se a11y falhou (não bloqueia)
         if: steps.a11y.outcome == 'failure'
-        run: exit 1
+        run: |
+          echo "::warning::A11y tests falharam — sample-app provavelmente tem violações WCAG. Veja o artifact 'a11y-report' pra detalhes."

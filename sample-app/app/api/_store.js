@@ -14,8 +14,6 @@ export function getTodo(id) {
 }
 
 export function createTodo(text) {
-  // BUG #1 (proposital): não valida texto vazio antes de criar.
-  // Cliente é defensivo, mas a API aceita "" e cria um TODO inválido.
   const todo = { id: store.nextId++, text, done: false, createdAt: new Date().toISOString() };
   store.todos.push(todo);
   return todo;
@@ -24,8 +22,7 @@ export function createTodo(text) {
 export function toggleTodo(id) {
   const t = store.todos.find((x) => x.id === id);
   if (!t) return null;
-  // BUG #2 (proposital): toggle sempre marca como done, em vez de inverter.
-  t.done = true;
+  t.done = !t.done;
   return t;
 }
 

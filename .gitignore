@@ -4,6 +4,7 @@ out/
 dist/
 build/
 coverage/
+coverage-tmp/
 playwright-report/
 test-results/
 perf-reports/

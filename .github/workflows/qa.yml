@@ -41,10 +41,18 @@ jobs:
       - name: Build sample-app
         run: npm --prefix sample-app run build
 
-      - name: Start dev server
+      - name: Start dev server (detached)
         run: |
-          npm --prefix sample-app run dev &
+          # nohup + setsid mantém o processo vivo após o step terminar.
+          # GitHub Actions envia SIGHUP entre steps para processos filhos da shell.
+          mkdir -p /tmp/dev-logs
+          nohup setsid npm --prefix sample-app run dev > /tmp/dev-logs/server.log 2>&1 < /dev/null &
           npx wait-on http://localhost:3000 -t 60000
+          curl -sf http://localhost:3000/api/todos > /dev/null && echo "✓ dev vivo"
+
+      - name: Confirma que dev server sobreviveu ao step
+        run: |
+          curl -sf http://localhost:3000/api/todos > /dev/null && echo "✓ dev ainda vivo" || (echo "✗ dev morreu" && tail -50 /tmp/dev-logs/server.log && exit 1)
 
       - name: Run API tests
         id: api
@@ -55,6 +63,20 @@ jobs:
         id: web
         run: npm run test:web
         continue-on-error: true
+
+      - name: Debug — emite anotações com outcomes e logs
+        if: always()
+        run: |
+          esc() { sed -e 's/%/%25/g' -e ':a' -e 'N' -e '$!ba' -e 's/\n/%0A/g' -e 's/\r/%0D/g'; }
+          echo "::notice title=outcomes::API=${{ steps.api.outcome }} Web=${{ steps.web.outcome }}"
+          DEV_LOG=$(tail -40 /tmp/dev-logs/server.log 2>/dev/null | head -c 2000 | esc)
+          echo "::notice title=dev_server_tail::$DEV_LOG"
+          for f in $(find test-results -type f -name "*.md" 2>/dev/null | head -3); do
+            CONTENT=$(head -c 1500 "$f" | esc)
+            echo "::error file=$f,title=playwright_failure::$CONTENT"
+          done
+          echo "=== sanity ==="
+          curl -s http://localhost:3000/api/todos || echo "dev down"
 
       - name: Upload Playwright report
         if: always()
