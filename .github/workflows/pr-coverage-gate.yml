@@ -71,7 +71,7 @@ jobs:
 
       - name: Roda testes
         if: steps.diff.outputs.changed != ''
-        run: node --test tests/api/*.test.js
+        run: node --test --test-concurrency=1 tests/api/*.test.js
         continue-on-error: true
 
       - name: Termina dev pra flush do coverage
