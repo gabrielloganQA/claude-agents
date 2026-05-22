@@ -16,6 +16,23 @@ async function api(method, path, body) {
   return { status: r.status, data };
 }
 
+test("POST /api/todos sem Content-Type retorna 415", async () => {
+  const r = await fetch(`${BASE}/api/todos`, {
+    method: "POST",
+    body: JSON.stringify({ text: "sem-content-type" }),
+  });
+  assert.equal(r.status, 415, "Ausência de Content-Type deveria retornar 415");
+});
+
+test("POST /api/todos com Content-Type errado retorna 415", async () => {
+  const r = await fetch(`${BASE}/api/todos`, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain" },
+    body: JSON.stringify({ text: "content-type-errado" }),
+  });
+  assert.equal(r.status, 415, "Content-Type incorreto deveria retornar 415");
+});
+
 test("POST /api/todos rejeita texto vazio com 400", async () => {
   const r = await api("POST", "/api/todos", { text: "" });
   assert.equal(r.status, 400, "Texto vazio deveria ser rejeitado");
