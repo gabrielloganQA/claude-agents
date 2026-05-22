@@ -8,7 +8,7 @@
     "build": "npm --prefix sample-app run build",
     "start": "npm --prefix sample-app run start",
     "test:web": "playwright test",
-    "test:api": "node --test tests/api/*.test.js",
+    "test:api": "node --test --test-concurrency=1 tests/api/*.test.js",
     "test:all": "npm run test:api && npm run test:web",
     "watch": "node scripts/watch.js",
     "install:all": "npm install && npm --prefix sample-app install && npx playwright install chromium"
