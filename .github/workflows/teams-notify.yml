@@ -1,0 +1,112 @@
+name: Teams — notificações
+
+# Notifica canal do Microsoft Teams via webhook em 3 eventos:
+#   1. Pipeline falhando (qa.yml ou qa-nightly.yml em main)
+#   2. PR aberta por agente (dependabot, branches fix/* ou autor [bot])
+#   3. Issue aberta com label `bug` ou `security`
+#
+# Setup: ver docs/TEAMS-INTEGRATION.md. Resumo:
+#   1. No Teams, criar Workflow → "Post to channel when a webhook request is received"
+#   2. Copiar URL gerada
+#   3. GitHub repo Settings → Secrets → criar `TEAMS_WEBHOOK_URL`
+#
+# Sem o secret configurado, o workflow roda mas pula a notificação (no-op silencioso).
+
+on:
+  workflow_run:
+    workflows:
+      - "QA — testes contínuos"
+      - "QA — varredura noturna"
+    types: [completed]
+
+  pull_request:
+    types: [opened, reopened]
+
+  issues:
+    types: [opened, labeled]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  # === 1. Pipeline falhou em main ===
+  pipeline-failure:
+    if: >
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Notificar Teams — pipeline failure
+        env:
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+        run: |
+          bash scripts/notify-teams.sh \
+            "failure" \
+            "${{ github.event.workflow_run.name }} #${{ github.event.workflow_run.run_number }}" \
+            "Branch: main · SHA: ${{ github.event.workflow_run.head_sha }} · Conclusion: failure" \
+            "${{ github.event.workflow_run.html_url }}"
+
+  # === 2. PR aberta por agente ===
+  agent-pr-opened:
+    if: >
+      github.event_name == 'pull_request' &&
+      (
+        github.event.pull_request.user.login == 'dependabot[bot]' ||
+        endsWith(github.event.pull_request.user.login, '[bot]') ||
+        startsWith(github.event.pull_request.head.ref, 'fix/') ||
+        startsWith(github.event.pull_request.head.ref, 'feat/') ||
+        contains(github.event.pull_request.labels.*.name, 'auto-update') ||
+        contains(github.event.pull_request.labels.*.name, 'dependencies')
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Notificar Teams — PR aberta
+        env:
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+        run: |
+          bash scripts/notify-teams.sh \
+            "pr" \
+            "#${{ github.event.pull_request.number }} — ${{ github.event.pull_request.title }}" \
+            "Autor: ${{ github.event.pull_request.user.login }} · Branch: ${{ github.event.pull_request.head.ref }}" \
+            "${{ github.event.pull_request.html_url }}"
+
+  # === 3. Issue bug/security aberta ===
+  bug-or-security-opened:
+    if: >
+      github.event_name == 'issues' &&
+      github.event.action == 'opened' &&
+      (
+        contains(github.event.issue.labels.*.name, 'bug') ||
+        contains(github.event.issue.labels.*.name, 'security')
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Definir tipo (bug ou security)
+        id: kind
+        run: |
+          if [[ "${{ contains(github.event.issue.labels.*.name, 'security') }}" == "true" ]]; then
+            echo "kind=security" >> "$GITHUB_OUTPUT"
+          else
+            echo "kind=bug" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Notificar Teams — issue aberta
+        env:
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+        run: |
+          bash scripts/notify-teams.sh \
+            "${{ steps.kind.outputs.kind }}" \
+            "#${{ github.event.issue.number }} — ${{ github.event.issue.title }}" \
+            "Labels: ${{ join(github.event.issue.labels.*.name, ', ') }}" \
+            "${{ github.event.issue.html_url }}"
