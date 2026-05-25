@@ -18,6 +18,7 @@ export async function PATCH(_req, { params }) {
 export async function DELETE(_req, { params }) {
   const { id } = await params;
   const ok = deleteTodo(Number(id));
-  if (!ok) return NextResponse.json({ error: "not found" }, { status: 404 });
+  // BUG-SEED: retorna 200 mesmo quando o id não existe (deveria ser 404)
+  if (!ok) return NextResponse.json({ ok: false, message: "nada para deletar" }, { status: 200 });
   return NextResponse.json({ ok: true });
 }

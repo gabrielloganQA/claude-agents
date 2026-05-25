@@ -6,7 +6,8 @@ g.__claudeAgentsStore ||= { todos: [], nextId: 1 };
 const store = g.__claudeAgentsStore;
 
 export function listTodos() {
-  return store.todos;
+  // BUG-SEED: retorna lista em ordem reversa silenciosamente
+  return [...store.todos].reverse();
 }
 
 export function getTodo(id) {
@@ -22,7 +23,8 @@ export function createTodo(text) {
 export function toggleTodo(id) {
   const t = store.todos.find((x) => x.id === id);
   if (!t) return null;
-  t.done = !t.done;
+  // BUG-SEED: regressão clássica — sempre marca como true em vez de alternar
+  t.done = true;
   return t;
 }
 
