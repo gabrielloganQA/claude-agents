@@ -3,26 +3,32 @@
 [![QA](https://github.com/gabrielloganQA/claude-agents/actions/workflows/qa.yml/badge.svg)](https://github.com/gabrielloganQA/claude-agents/actions/workflows/qa.yml)
 [![QA nightly](https://github.com/gabrielloganQA/claude-agents/actions/workflows/qa-nightly.yml/badge.svg)](https://github.com/gabrielloganQA/claude-agents/actions/workflows/qa-nightly.yml)
 
-> Sistema multi-agente em Claude Code para QA + correção + segurança + deps + docs.
+> Sistema multi-agente em Claude Code para QA + correção + segurança + deps + docs + métricas.
 
 Agentes que trabalham em loop para garantir qualidade contínua de uma aplicação:
 
-- **qa-tester** — executa a suite de testes (Playwright + API) e abre um *GitHub Issue* para cada falha.
+- **qa-tester / qa-explorer / qa-pre-pr** — regressão, descoberta e shift-left.
 - **dev-fixer** — pega uma issue do QA, reproduz, corrige e abre um *Pull Request* linkado.
 - **security-scanner** — roda `npm audit` + heurísticas SAST e abre issues de segurança.
+- **coverage-auditor / mutation-tester** — mede cobertura objetiva e qualidade da suite.
+- **perf-regression / a11y-checker** — Lighthouse e WCAG.
+- **triage-bot** — categoriza/prioriza issues novas em `priority:high|medium|low`.
+- **retrospective** — relatório semanal com MTTR, hotspots, ações.
 - **dep-updater** — processa PRs do Dependabot e revalida com a suite.
 - **docs-writer** — sincroniza documentação quando o código muda.
 
-Toda PR aberta por agentes passa por **revisão humana** antes do merge. Após merge, o QA reroda automaticamente.
+Toda PR aberta por agentes passa por **revisão humana** antes do merge. Após merge, o QA reroda automaticamente. Convenções globais em [CLAUDE.md](./CLAUDE.md).
 
 ## Disparadores contínuos
 
 | Mecanismo                    | Quando                                |
 | ---------------------------- | ------------------------------------- |
-| GitHub Actions (`qa.yml`)    | Todo push / PR para `main`            |
-| GitHub Actions (`qa-nightly`)| Todo dia às 03:00 BRT                 |
-| Routine Claude (`/schedule`) | Cron configurável (cloud)             |
-| Watcher local                | Em desenvolvimento ativo (`npm run watch`) |
+| GitHub Actions (`qa.yml`)        | Todo push / PR para `main`            |
+| GitHub Actions (`qa-nightly`)    | Todo dia às 03:00 BRT                 |
+| GitHub Actions (`dashboard.yml`) | Painel diário às 08:00 BRT (grátis)   |
+| GitHub Actions (`verify-after-merge`) | Fecha o ciclo bug→fix automaticamente |
+| Routine Claude (`/schedule`)     | Cron configurável (cloud, consome quota)|
+| Watcher local                    | Em desenvolvimento ativo (`npm run watch`) |
 
 ## Como usar
 

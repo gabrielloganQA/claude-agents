@@ -1,12 +1,15 @@
 name: A11y — WCAG 2.1 AA
 
+# DESABILITADO temporariamente — empresa ainda não adotou a11y como gate.
+# Quando começar a implementar WCAG, descomente os triggers abaixo.
+# Por enquanto só roda sob demanda (Actions tab → Run workflow).
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-  schedule:
-    - cron: "0 7 * * 1"  # toda segunda 07:00 UTC (04:00 BRT)
+  # push:
+  #   branches: [main]
+  # pull_request:
+  #   branches: [main]
+  # schedule:
+  #   - cron: "0 7 * * 1"  # toda segunda 07:00 UTC (04:00 BRT)
   workflow_dispatch:
 
 permissions:

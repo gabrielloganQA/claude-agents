@@ -1,0 +1,153 @@
+name: Dashboard — métricas do projeto
+
+# Mantém uma única issue "📊 QA Dashboard" atualizada diariamente com
+# contadores de bugs, PRs, deps, etc. Tudo via gh CLI — zero custo Claude.
+
+on:
+  schedule:
+    - cron: "0 11 * * *" # 11:00 UTC = 08:00 BRT — começo do dia
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  refresh-dashboard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Gerar painel
+        id: gen
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+
+          # Contadores básicos
+          OPEN_BUGS=$(gh issue list --state open --label "bug" --json number --jq "length")
+          OPEN_HIGH=$(gh issue list --state open --label "priority:high" --json number --jq "length")
+          OPEN_MED=$(gh issue list --state open --label "priority:medium" --json number --jq "length")
+          OPEN_LOW=$(gh issue list --state open --label "priority:low" --json number --jq "length")
+          UNTRIAGED=$(gh issue list --state open --label "bug" --no-label "triaged" --json number --jq "length")
+          SECURITY=$(gh issue list --state open --label "security" --json number --jq "length")
+          A11Y=$(gh issue list --state open --label "a11y" --json number --jq "length")
+          PERF=$(gh issue list --state open --label "perf" --json number --jq "length")
+          FLAKY=$(gh issue list --state open --label "flaky" --json number --jq "length")
+
+          OPEN_PRS=$(gh pr list --state open --json number --jq "length")
+          DEP_PRS=$(gh pr list --state open --label "dependencies" --json number --jq "length")
+
+          # Janela de 7 dias
+          SINCE=$(date -u -d "7 days ago" +%Y-%m-%dT%H:%M:%SZ)
+          CLOSED_7D=$(gh issue list --state closed --label "bug" --search "closed:>=$SINCE" --json number --jq "length")
+          OPENED_7D=$(gh issue list --state all --label "bug" --search "created:>=$SINCE" --json number --jq "length")
+          MERGED_7D=$(gh pr list --state merged --search "merged:>=$SINCE" --json number --jq "length")
+
+          # Net backlog change
+          DELTA=$((CLOSED_7D - OPENED_7D))
+          DELTA_SIGN="+"
+          if [ $DELTA -lt 0 ]; then DELTA_SIGN=""; fi
+
+          # Status emoji baseado em saúde
+          if [ $OPEN_HIGH -gt 0 ] || [ $SECURITY -gt 0 ]; then
+            STATUS="🔴 atenção imediata"
+          elif [ $UNTRIAGED -gt 5 ] || [ $OPEN_BUGS -gt 20 ]; then
+            STATUS="🟡 acúmulo no backlog"
+          else
+            STATUS="🟢 saudável"
+          fi
+
+          # Monta o body
+          BODY=$(cat <<EOF
+          # 📊 QA Dashboard
+
+          _Atualizado automaticamente pelo workflow \`dashboard.yml\` em $(date -u +%Y-%m-%d\ %H:%M\ UTC)._
+
+          ## Status geral: $STATUS
+
+          ## Backlog atual
+
+          | Categoria | Aberto |
+          |---|---|
+          | 🐛 Bugs totais | **$OPEN_BUGS** |
+          | 🔴 priority:high | $OPEN_HIGH |
+          | 🟡 priority:medium | $OPEN_MED |
+          | 🟢 priority:low | $OPEN_LOW |
+          | 📥 Sem triagem | **$UNTRIAGED** |
+          | 🔒 Security | $SECURITY |
+          | ♿ A11y | $A11Y |
+          | ⚡ Perf | $PERF |
+          | 🌀 Flaky | $FLAKY |
+
+          ## PRs
+
+          | Tipo | Aberto |
+          |---|---|
+          | Total | $OPEN_PRS |
+          | Dependabot | $DEP_PRS |
+
+          ## Últimos 7 dias
+
+          | Métrica | Valor |
+          |---|---|
+          | 🐞 Bugs abertos | $OPENED_7D |
+          | ✅ Bugs fechados | $CLOSED_7D |
+          | 🚀 PRs mergeadas | $MERGED_7D |
+          | 📉 Saldo backlog | ${DELTA_SIGN}${DELTA} |
+
+          ## Próxima ação sugerida
+          $(
+            if [ $SECURITY -gt 0 ]; then
+              echo "1. 🔒 **Atacar segurança primeiro**: $SECURITY issue(s) abertas."
+            elif [ $OPEN_HIGH -gt 0 ]; then
+              echo "1. 🔴 **High priority**: rodar \`/dev-fix\` na issue mais antiga com \`priority:high\`."
+            elif [ $UNTRIAGED -gt 0 ]; then
+              echo "1. 📥 **Triar**: $UNTRIAGED issue(s) sem triagem — rodar \`/triage\`."
+            elif [ $OPEN_BUGS -gt 0 ]; then
+              echo "1. 🟡 Rodar \`/dispatch\` pra ver onde alocar trabalho."
+            else
+              echo "🎉 Inbox zero. Considere rodar \`/qa-explore\` pra evoluir a suite."
+            fi
+          )
+
+          ---
+          _Não comente nesta issue — ela é regenerada toda manhã. Para conversar sobre métricas, abra uma nova issue ou Discussion._
+          EOF
+          )
+
+          # Salva em arquivo pra próximo step
+          echo "$BODY" > /tmp/dashboard-body.md
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+
+      - name: Atualizar ou criar issue dashboard
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          gh label create "dashboard" --color "0e8a16" --description "Painel auto-atualizado" 2>/dev/null || true
+
+          # Procura issue existente com label dashboard
+          EXISTING=$(gh issue list --label "dashboard" --state all --json number,title --jq '.[0].number // empty')
+
+          if [ -n "$EXISTING" ]; then
+            echo "Atualizando issue #$EXISTING"
+            gh issue edit "$EXISTING" --body-file /tmp/dashboard-body.md
+            # Reabre se foi fechada
+            gh issue reopen "$EXISTING" 2>/dev/null || true
+          else
+            echo "Criando issue dashboard pela primeira vez"
+            gh issue create \
+              --title "📊 QA Dashboard" \
+              --label "dashboard" \
+              --body-file /tmp/dashboard-body.md \
+              --pin 2>/dev/null || \
+            gh issue create \
+              --title "📊 QA Dashboard" \
+              --label "dashboard" \
+              --body-file /tmp/dashboard-body.md
+          fi

@@ -10,6 +10,10 @@
     "test:web": "playwright test",
     "test:api": "node --test --test-concurrency=1 tests/api/*.test.js",
     "test:all": "npm run test:api && npm run test:web",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "watch": "node scripts/watch.js",
     "install:all": "npm install && npm --prefix sample-app install && npx playwright install chromium"
   },
