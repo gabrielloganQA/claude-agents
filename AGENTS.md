@@ -6,8 +6,15 @@ Este projeto traz uma frota de agentes Claude Code que cobrem o ciclo de qualida
 | ------------------ | ------------------------------------------------------------------- |
 | **qa-tester**      | Roda suite (web+API), abre GitHub Issues para cada bug (regressão). |
 | **qa-explorer**    | Gera testes para cenários ainda não cobertos usando metodologias formais (boundary, decision table, mutation, etc.). Abre issues + PRs. |
+| **qa-pre-pr**      | Shift-left: testes pro diff antes da PR ser aberta.                 |
+| **coverage-auditor** | Mede cobertura c8 (statement/branch/function) e propõe testes pros gaps. |
+| **mutation-tester** | Stryker — mede QUALIDADE da suite (não só quantidade).             |
 | **dev-fixer**      | Pega issues do QA, corrige código, abre PR pra revisão humana.      |
 | **security-scanner** | Roda `npm audit` + SAST leve + busca secrets. Abre issues.        |
+| **perf-regression** | Lighthouse — detecta regressões em LCP/TTI/CLS.                    |
+| **a11y-checker**   | axe-core — valida WCAG 2.1 AA. (Desativado em CI por enquanto.)     |
+| **triage-bot**     | Categoriza issues abertas → labels `priority:*` e `area:*`. Ordena fila pro dev-fixer. |
+| **retrospective**  | Relatório semanal — MTTR, hotspots, ações concretas.                |
 | **dep-updater**    | Avalia PRs do Dependabot, roda suite, comenta recomendação.         |
 | **docs-writer**    | Mantém README/AGENTS/docs sincronizados com o código.               |
 
@@ -35,14 +42,24 @@ gh auth login
 
 | Comando            | Agente disparado     | O que faz                                                              |
 | ------------------ | -------------------- | ---------------------------------------------------------------------- |
+| `/dispatch`        | (sem agente — leitura) | Painel: lista issues/PRs abertos e sugere ordem ideal. **Comece aqui.** |
+| `/qa-tudo`         | múltiplos (orquestrador) | **Faz-tudo**: regressão + segurança + cobertura + perf + triagem. ~25min. |
 | `/qa-run`          | qa-tester            | Roda toda a suite, abre 1 issue por bug encontrado.                    |
 | `/qa-run --apenas-api` | qa-tester        | Só API.                                                                |
 | `/qa-run --apenas-web` | qa-tester        | Só Playwright.                                                         |
 | `/qa-explore`      | qa-explorer          | Gera 5-10 testes para cenários não cobertos. Bug → issue. Valioso → PR adicionando ao suite. |
 | `/qa-explore <area>` | qa-explorer        | Foca a exploração numa área (ex: `/qa-explore api/todos POST`).        |
-| `/dev-fix [N]`     | dev-fixer            | Corrige issue #N (ou a mais antiga) e abre PR.                         |
+| `/qa-pre-pr`       | qa-pre-pr            | Testes pro diff atual antes de abrir PR (shift-left).                  |
+| `/pre-pr-check`    | múltiplos            | Bateria shift-left completa (qa-pre-pr + coverage + security + mutation). |
+| `/triage`          | triage-bot           | Categoriza+prioriza issues abertas. Aplica `priority:*` e `area:*`.    |
+| `/dev-fix [N]`     | dev-fixer            | Corrige issue #N (ou a mais antiga `priority:high`) e abre PR.         |
 | `/verify <PR#>`    | qa-tester (verify)   | Roda suite contra a branch da PR, comenta resultado.                   |
 | `/security-scan`   | security-scanner     | Auditoria de segurança (audit + secrets + SAST).                       |
+| `/coverage-audit`  | coverage-auditor     | Mede cobertura e propõe testes pros gaps.                              |
+| `/mutation-test`   | mutation-tester      | Mede qualidade da suite (Stryker).                                     |
+| `/perf-check`      | perf-regression      | Lighthouse vs baseline.                                                |
+| `/a11y-check`      | a11y-checker         | axe-core (WCAG 2.1 AA).                                                |
+| `/retro`           | retrospective        | Retrospectiva semanal — MTTR, hotspots, ações.                         |
 | `/dep-review [N]`  | dep-updater          | Avalia PRs do Dependabot.                                              |
 | `/docs-update`     | docs-writer          | Sincroniza docs com código atual.                                      |
 
@@ -68,13 +85,23 @@ Veja **[docs/ROUTINES-CLAUDE.md](./docs/ROUTINES-CLAUDE.md)**. Permite rodar age
 - Reroda suite de API automaticamente a cada save.
 - Útil pra dev ativo; **não substitui** os disparos acima.
 
-## 4. Fluxo típico
+## 4. Fluxo típico (com triagem)
 
 ```
 ┌─────────────────────────┐    falha    ┌────────────────┐
 │ Push pra main / Cron 3am│ ──────────▶ │  GitHub Issue  │
 │      / /qa-run          │             │ (bug,qa-found) │
 └─────────────────────────┘             └────────────────┘
+                                                  │
+                                                  ▼
+                                          ┌──────────────┐
+                                          │   /triage    │ ─ aplica priority:*, area:*
+                                          └──────────────┘
+                                                  │
+                                                  ▼
+                                          ┌──────────────┐
+                                          │  /dispatch   │ ─ vê o painel, escolhe próxima
+                                          └──────────────┘
                                                   │
                                                   ▼
                                           ┌──────────────┐
@@ -88,10 +115,23 @@ Veja **[docs/ROUTINES-CLAUDE.md](./docs/ROUTINES-CLAUDE.md)**. Permite rodar age
                                        └──────────────────┘
                                                   │  aprova + merge
                                                   ▼
+                                          ┌──────────────────┐
+                                          │ verify-after-merge│ ─ workflow auto
+                                          └──────────────────┘
+                                                  │
+                                                  ▼ (1x/semana)
                                           ┌──────────────┐
-                                          │  /verify PR  │ ─ comenta resultado
+                                          │    /retro    │ ─ relatório
                                           └──────────────┘
 ```
+
+**Dia-a-dia sugerido**:
+1. Manhã: olhar a issue "📊 QA Dashboard" (atualizada às 08:00 BRT automaticamente).
+2. Rodar `/dispatch` no Claude Code → ver o que está aberto.
+3. Se há issues sem triagem → `/triage`.
+4. Pegar a issue `priority:high` mais antiga → `/dev-fix N`.
+5. Revisar e mergear PRs abertas (dependabot, dev-fixer).
+6. Sexta-feira: `/retro` pra relatório da semana.
 
 Em paralelo:
 - `/security-scan` (humano dispara ou routine) → issues `security,qa-found` → `dev-fixer` corrige.
@@ -111,6 +151,12 @@ Em paralelo:
 | `auto-update`      | Dependabot                                        |
 | `docs`             | Mudança de documentação                           |
 | `major-upgrade`    | Bump major detectado pelo `dep-updater`           |
+| `triaged`          | Issue triada por `triage-bot`                     |
+| `priority:high\|medium\|low` | Prioridade após triagem                 |
+| `area:api\|ui\|ci\|deps\|security\|a11y\|perf` | Área afetada       |
+| `flaky`            | Teste intermitente confirmado                     |
+| `dashboard`        | Issue auto-atualizada pelo workflow dashboard     |
+| `retro`            | Relatório semanal do `retrospective`              |
 
 Agentes filtram por label — manter consistente é importante.
 
@@ -134,15 +180,15 @@ A pasta `sample-app/` é só uma cobaia. Para usar contra uma app real:
 4. Ajuste `.github/workflows/qa.yml` para servir a app real.
 5. Confira que `gh auth status` aponta para a org da empresa antes de rodar.
 
-## 8. Bugs propositais no `sample-app/`
+## 8. Histórico — bugs propositais já corrigidos
 
-Plantamos 3 bugs no `sample-app/` para o time ver o ciclo funcionando:
+Plantamos 3 bugs no `sample-app/` para exercitar o ciclo completo. Todos já foram detectados e corrigidos pelos agentes — ficam aqui como referência histórica:
 
-1. **`sample-app/app/api/_store.js`** — `createTodo` não valida texto vazio (API aceita `""`).
-2. **`sample-app/app/api/_store.js`** — `toggleTodo` sempre marca `done=true` em vez de alternar.
-3. **`sample-app/app/api/todos/route.js`** — falta endpoint `/api/todos/reset` que testes esperam.
+1. ~~`createTodo` aceitava texto vazio~~ → corrigido em `sample-app/app/api/todos/route.js` (validação no POST).
+2. ~~`toggleTodo` sempre marcava `done=true`~~ → corrigido em `sample-app/app/api/_store.js`.
+3. ~~Faltava endpoint `/api/todos/reset`~~ → adicionado (vide PR #24).
 
-O `qa-tester` deve achar todos ao rodar `/qa-run`.
+Para continuar exercitando o ciclo, dispare `/qa-explore` (já rodou uma vez e encontrou a issue #25 — POST sem Content-Type retorna 201 em vez de 400).
 
 ## 9. Solução de problemas
 

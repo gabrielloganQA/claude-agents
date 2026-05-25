@@ -74,19 +74,29 @@ jobs:
         run: |
           DATE=$(date -u +%Y-%m-%d)
           TITLE="[QA-noturno] Suite falhou em $DATE"
+
+          # Dedup: se já existe issue qa-nightly aberta há <7 dias, só comenta o run novo.
+          EXISTING=$(gh issue list --label "bug,qa-nightly" --state open --json number,createdAt --jq \
+            '[.[] | select((now - (.createdAt | fromdateiso8601)) < 604800)] | .[0].number // empty')
+
+          if [ -n "$EXISTING" ]; then
+            echo "Já existe issue #$EXISTING aberta há <7d. Adicionando comentário."
+            gh issue comment "$EXISTING" --body "Falhou novamente — run: https://github.com/$REPO/actions/runs/$RUN ($DATE)"
+            exit 0
+          fi
+
           BODY=$(cat <<EOF
           A varredura noturna detectou falha na suite sem mudanças recentes no código —
-          provavelmente uma regressão de dependência ou ambiente.
+          provavelmente uma regressão de dependência, ambiente, ou flakiness.
 
           - Run: https://github.com/$REPO/actions/runs/$RUN
           - Investigar antes de abrir trabalho do dia.
+          - Se o teste falhar intermitentemente sem mudança no código, marcar com label \`flaky\` (ver CLAUDE.md §9).
 
           _Aberta automaticamente pelo workflow \`qa-nightly.yml\`._
           EOF
           )
-          if gh issue list --label "bug,qa-nightly" --search "$DATE in:title" --state open --json number --jq "length" | grep -q "^0$"; then
-            gh issue create --title "$TITLE" --label "bug,qa-nightly" --body "$BODY"
-          fi
+          gh issue create --title "$TITLE" --label "bug,qa-nightly" --body "$BODY"
 
       - name: Falhar workflow se suite falhou
         if: steps.suite.outcome == 'failure'

@@ -1,0 +1,17 @@
+node_modules/
+.next/
+out/
+dist/
+build/
+coverage/
+coverage-tmp/
+playwright-report/
+test-results/
+perf-reports/
+perf-baseline/
+mutation-report/
+.stryker-tmp/
+sample-app/.next/
+sample-app/node_modules/
+package-lock.json
+sample-app/package-lock.json
