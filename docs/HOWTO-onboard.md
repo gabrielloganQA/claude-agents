@@ -15,7 +15,7 @@ Onboarding em ~30 segundos via install.sh. Funciona em qualquer repo (Node, Pyth
 Dentro da raiz do repo alvo:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/Atlante-TI/claude-agents/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/gabrielloganQA/claude-agents/main/install.sh | bash
 ```
 
 O script:
@@ -56,7 +56,7 @@ repo-do-seu-projeto/
 └── .github/workflows/
     └── qa.yml             ← 10 linhas, chama o reusable
 
-Atlante-TI/claude-agents/        ← codigo real mora aqui
+gabrielloganQA/claude-agents/        ← codigo real mora aqui
 ├── .github/workflows/
 │   ├── qa-reusable.yml          ← logica completa
 │   ├── notify-issues-reusable.yml
@@ -95,7 +95,7 @@ Editar `.github/workflows/qa.yml` pra override defaults:
 ```yaml
 jobs:
   qa:
-    uses: Atlante-TI/claude-agents/.github/workflows/qa-reusable.yml@v1
+    uses: gabrielloganQA/claude-agents/.github/workflows/qa-reusable.yml@v1
     with:
       test-cmd: "npm run cy:qa"
       needs-dev-server: true
@@ -150,4 +150,4 @@ Nesses casos, copie os trechos do template manualmente.
 → Script não sobrescreve. Renomeie o seu pra `qa-legacy.yml` ou ajuste manualmente.
 
 **Reusable workflow falha com "repository not found"**
-→ Se `Atlante-TI/claude-agents` é privado, o repo consumidor precisa de Actions configurado pra acessar repos privados na mesma org. Settings → Actions → "Allow Atlante-TI/* actions".
+→ Se `gabrielloganQA/claude-agents` é privado, o repo consumidor precisa de Actions configurado pra acessar repos privados na mesma org. Settings → Actions → "Allow gabrielloganQA/* actions".

@@ -2,7 +2,7 @@
 # claude-agents installer — bootstrap o framework de QA multi-agente num repo.
 #
 # Uso:
-#   curl -sSL https://raw.githubusercontent.com/Atlante-TI/claude-agents/main/install.sh | bash
+#   curl -sSL https://raw.githubusercontent.com/gabrielloganQA/claude-agents/main/install.sh | bash
 #   ou
 #   bash install.sh [--dry-run] [--framework-ref v1]
 #
@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-FRAMEWORK_OWNER="Atlante-TI"
+FRAMEWORK_OWNER="gabrielloganQA"
 FRAMEWORK_REPO="claude-agents"
 FRAMEWORK_REF="${FRAMEWORK_REF:-main}"
 DRY_RUN=false

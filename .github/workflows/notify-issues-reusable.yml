@@ -7,7 +7,7 @@ name: Notify Teams (issues) — reusable
 #       types: [opened, labeled]
 #   jobs:
 #     notify:
-#       uses: Atlante-TI/claude-agents/.github/workflows/notify-issues-reusable.yml@v1
+#       uses: gabrielloganQA/claude-agents/.github/workflows/notify-issues-reusable.yml@v1
 #       secrets:
 #         TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
 #
@@ -38,7 +38,7 @@ jobs:
       - name: Checkout framework (para usar composite action)
         uses: actions/checkout@v6
         with:
-          repository: Atlante-TI/claude-agents
+          repository: gabrielloganQA/claude-agents
           ref: ${{ github.action_ref || 'main' }}
           path: _framework
 
