@@ -40,7 +40,7 @@ jobs:
             COLOR="attention"
           fi
 
-          ./scripts/notify-teams.sh \
+          bash scripts/notify-teams.sh \
             --title "[$KIND] #${{ github.event.pull_request.number }} — ${{ github.event.pull_request.title }}" \
             --color "$COLOR" \
             --message "Aberta por \`$AUTHOR\` aguardando revisão de CODEOWNERS." \
