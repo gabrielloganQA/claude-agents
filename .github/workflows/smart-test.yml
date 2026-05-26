@@ -1,0 +1,111 @@
+name: Smart Test — só roda o que importa pro diff
+
+# Versão otimizada do qa.yml — escolhe quais testes rodar baseado em
+# qual área foi tocada. Reduz CI de ~5min pra <2min quando diff é
+# pequeno/isolado.
+#
+# Roda em paralelo com qa.yml (não substitui — coexiste como sinal extra
+# pra dev ver feedback mais rápido). Quando estabilizado, pode substituir.
+#
+# 100% grátis. Pure shell + git diff.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  decide:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      run_api: ${{ steps.s.outputs.run_api }}
+      run_web: ${{ steps.s.outputs.run_web }}
+      strategy: ${{ steps.s.outputs.strategy }}
+      reason: ${{ steps.s.outputs.reason }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Selecionar testes
+        id: s
+        run: |
+          chmod +x scripts/select-tests.sh
+          bash scripts/select-tests.sh \
+            "${{ github.event.pull_request.base.sha }}" \
+            "${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+
+      - name: Comentar estratégia na PR (info)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          BODY="🎯 **Smart Test Selection** · estratégia: \`${{ steps.s.outputs.strategy }}\`
+
+          - API: ${{ steps.s.outputs.run_api == 'true' && '✅' || '⏭️' }}
+          - Web: ${{ steps.s.outputs.run_web == 'true' && '✅' || '⏭️' }}
+
+          Razão: ${{ steps.s.outputs.reason }}
+
+          _Análise por \`scripts/select-tests.sh\` — heurística, não substitui qa.yml._"
+
+          # Update or create
+          EXISTING=$(gh api "repos/$REPO/issues/$PR/comments" --jq \
+            '.[] | select(.user.login == "github-actions[bot]") | select(.body | contains("Smart Test Selection")) | .id' | head -1)
+
+          if [ -n "$EXISTING" ]; then
+            gh api "repos/$REPO/issues/comments/$EXISTING" -X PATCH -f body="$BODY" > /dev/null
+          else
+            gh pr comment "$PR" --body "$BODY"
+          fi
+
+  test:
+    needs: decide
+    if: needs.decide.outputs.strategy != 'skip'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: |
+            package-lock.json
+            sample-app/package-lock.json
+
+      - name: Install deps
+        run: |
+          npm install
+          npm --prefix sample-app install
+
+      - name: Install Playwright (só se vai rodar web)
+        if: needs.decide.outputs.run_web == 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Build sample-app
+        run: npm --prefix sample-app run build
+
+      - name: Subir dev server
+        run: |
+          mkdir -p /tmp/dev-logs
+          nohup setsid npm --prefix sample-app run dev > /tmp/dev-logs/srv.log 2>&1 < /dev/null &
+          npx wait-on http://localhost:3000 -t 60000
+
+      - name: Run API tests
+        if: needs.decide.outputs.run_api == 'true'
+        run: npm run test:api
+
+      - name: Run Web tests
+        if: needs.decide.outputs.run_web == 'true'
+        run: npm run test:web

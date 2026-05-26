@@ -27,6 +27,7 @@ Toda PR aberta por agentes passa por **revisão humana** antes do merge. Após m
 | GitHub Actions (`qa-nightly`)    | Todo dia às 03:00 BRT                 |
 | GitHub Actions (`dashboard.yml`) | Painel diário às 08:00 BRT (grátis)   |
 | GitHub Actions (`verify-after-merge`) | Fecha o ciclo bug→fix automaticamente |
+| GitHub Actions (innovations) | Bug bisect, risk score, conflict detector, demo GIF, smart test ([detalhes](./docs/INNOVATIONS.md)) |
 | Routine Claude (`/schedule`)     | Cron configurável (cloud, consome quota)|
 | Watcher local                    | Em desenvolvimento ativo (`npm run watch`) |
 
