@@ -1,0 +1,175 @@
+name: Bug bisect — encontra commit culpado
+
+# Faz git bisect automático em main entre o último commit verde e HEAD
+# pra encontrar QUAL commit introduziu o bug descrito numa issue.
+#
+# Disparo: manual via workflow_dispatch passando o número da issue.
+# Mais rápido que bisect manual e idempotente.
+#
+# Custo: 100% grátis. Roda só `git bisect` + `npm run test:api`. Sem LLM.
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Número da issue de regressão (ex: 42)"
+        required: true
+        type: string
+      test_command:
+        description: "Comando que testa o bug (default: npm run test:api)"
+        required: false
+        type: string
+        default: "npm run test:api"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  bisect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # bisect precisa do histórico completo
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: |
+            package-lock.json
+            sample-app/package-lock.json
+
+      - name: Install all
+        run: npm run install:all
+
+      - name: Achar último commit verde (good)
+        id: lastgreen
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Pega o último run do qa.yml com sucesso em main
+          GOOD=$(gh run list --workflow=qa.yml --branch=main --status=success --limit=1 --json headSha --jq '.[0].headSha // empty')
+          if [ -z "$GOOD" ]; then
+            echo "::warning::Nenhum commit verde encontrado em qa.yml. Usando HEAD~30 como fallback."
+            GOOD=$(git rev-parse HEAD~30 2>/dev/null || git rev-list --max-parents=0 HEAD | head -1)
+          fi
+          echo "good=$GOOD" >> "$GITHUB_OUTPUT"
+          echo "Último verde: $GOOD"
+
+      - name: Subir dev server (detached)
+        run: |
+          mkdir -p /tmp/dev-logs
+          nohup setsid npm --prefix sample-app run dev > /tmp/dev-logs/srv.log 2>&1 < /dev/null &
+          npx wait-on http://localhost:3000 -t 60000
+
+      - name: Confirmar que test command falha em HEAD (sanity)
+        id: sanity
+        run: |
+          if ${{ inputs.test_command }}; then
+            echo "::warning::Test command já passa em HEAD — não há bug pra bisectar."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+        continue-on-error: true
+
+      - name: Bisect
+        if: steps.sanity.outputs.skip != 'true'
+        id: bisect
+        run: |
+          set -e
+          # Mata server pra cada bisect run subir um fresh (evita cache)
+          pkill -f "next dev" || true
+          sleep 2
+
+          git bisect start
+          git bisect bad HEAD
+          git bisect good ${{ steps.lastgreen.outputs.good }}
+
+          # Script que cada step do bisect roda
+          cat > /tmp/bisect-runner.sh <<'EOS'
+          #!/usr/bin/env bash
+          set -e
+          npm --prefix sample-app run build 2>&1 | tail -5 || exit 125  # skip se nem builda
+          pkill -f "next dev" || true; sleep 1
+          nohup setsid npm --prefix sample-app run dev > /tmp/dev-logs/bisect.log 2>&1 < /dev/null &
+          npx wait-on http://localhost:3000 -t 60000 || exit 125
+          if ${{ inputs.test_command }}; then exit 0; else exit 1; fi
+          EOS
+          chmod +x /tmp/bisect-runner.sh
+
+          RESULT=$(git bisect run /tmp/bisect-runner.sh 2>&1 | tee /tmp/bisect.log | tail -20)
+          CULPRIT=$(echo "$RESULT" | grep -oE '[a-f0-9]{40}' | head -1)
+          echo "culprit=$CULPRIT" >> "$GITHUB_OUTPUT"
+          git bisect reset || true
+
+      - name: Coletar info do culpado
+        if: steps.bisect.outputs.culprit
+        id: info
+        env:
+          SHA: ${{ steps.bisect.outputs.culprit }}
+        run: |
+          SHORT=$(echo "$SHA" | cut -c1-8)
+          AUTHOR=$(git log -1 --format='%an <%ae>' "$SHA")
+          DATE=$(git log -1 --format='%ai' "$SHA")
+          SUBJECT=$(git log -1 --format='%s' "$SHA")
+          FILES=$(git show --stat --format='' "$SHA" | head -20)
+          {
+            echo "short=$SHORT"
+            echo "author=$AUTHOR"
+            echo "date=$DATE"
+            echo "subject<<EOF"
+            echo "$SUBJECT"
+            echo "EOF"
+            echo "files<<EOF"
+            echo "$FILES"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Comentar resultado na issue
+        if: steps.bisect.outputs.culprit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE: ${{ inputs.issue_number }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh issue comment "$ISSUE" --body "🎯 **Bisect concluído — commit culpado identificado**
+
+          - **SHA**: \`${{ steps.info.outputs.short }}\` ([abrir](https://github.com/$REPO/commit/${{ steps.bisect.outputs.culprit }}))
+          - **Autor**: ${{ steps.info.outputs.author }}
+          - **Data**: ${{ steps.info.outputs.date }}
+          - **Mensagem**: ${{ steps.info.outputs.subject }}
+
+          <details><summary>Arquivos alterados</summary>
+
+          \`\`\`
+          ${{ steps.info.outputs.files }}
+          \`\`\`
+
+          </details>
+
+          Comando que falhou: \`${{ inputs.test_command }}\`
+
+          _Bisectado automaticamente por [\`.github/workflows/bug-bisect.yml\`](https://github.com/$REPO/actions/runs/${{ github.run_id }}). Próximo passo: \`/dev-fix $ISSUE\`._"
+
+      - name: Se bisect não achou nada
+        if: steps.bisect.outputs.culprit == ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE: ${{ inputs.issue_number }}
+        run: |
+          gh issue comment "$ISSUE" --body "⚠️ **Bisect inconclusivo**
+
+          Não consegui isolar um único commit culpado. Possíveis causas:
+          - Bug intermitente (flaky)
+          - Bug em código não exercitado pelo \`${{ inputs.test_command }}\`
+          - Múltiplos commits contribuíram
+
+          Sugestões:
+          - Tentar com test command mais específico
+          - Revisar manualmente os últimos commits"

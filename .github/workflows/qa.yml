@@ -141,6 +141,20 @@ jobs:
             echo "Issue para $SHA já existe — não duplicando."
           fi
 
+      - name: Notificar Teams se falhou
+        if: (failure() || steps.api.outcome == 'failure' || steps.web.outcome == 'failure') && github.event_name == 'push'
+        env:
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+        run: |
+          ./scripts/notify-teams.sh \
+            --title "QA falhou em ${{ github.repository }}" \
+            --color "attention" \
+            --message "A suite quebrou no commit \`$(echo ${{ github.sha }} | cut -c1-7)\` da branch \`${{ github.ref_name }}\`." \
+            --fact "API=${{ steps.api.outcome }}" \
+            --fact "Web=${{ steps.web.outcome }}" \
+            --link "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --link-text "Ver run"
+
       - name: Falhar workflow se algum teste falhou
         if: steps.api.outcome == 'failure' || steps.web.outcome == 'failure'
         run: exit 1

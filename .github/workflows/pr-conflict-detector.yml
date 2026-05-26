@@ -1,0 +1,116 @@
+name: PR Conflict Detector — alerta sobreposição entre PRs abertas
+
+# Quando uma PR é aberta, lista TODOS arquivos que ela toca e compara com
+# os arquivos tocados por outras PRs abertas. Se há overlap, comenta na PR
+# alertando: "PR #X edita os mesmos arquivos — alinhem antes do merge".
+#
+# 100% grátis. Pure gh CLI + git diff.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Listar arquivos desta PR
+        id: my-files
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git diff --name-only "$BASE...$HEAD" > /tmp/my-files.txt
+          echo "Arquivos desta PR:"
+          cat /tmp/my-files.txt
+
+      - name: Comparar com outras PRs abertas
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MY_PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -e
+
+          # Lista outras PRs abertas (exceto esta)
+          OTHER_PRS=$(gh pr list --state open --json number --jq ".[] | select(.number != $MY_PR) | .number")
+
+          if [ -z "$OTHER_PRS" ]; then
+            echo "Não há outras PRs abertas — sem possibilidade de conflito."
+            exit 0
+          fi
+
+          CONFLICTS_FILE=/tmp/conflicts.md
+          : > "$CONFLICTS_FILE"
+
+          for OTHER in $OTHER_PRS; do
+            # Lista arquivos da outra PR
+            OTHER_FILES=$(gh pr view "$OTHER" --json files --jq '.files[].path')
+
+            # Acha overlap
+            OVERLAP=$(comm -12 <(sort /tmp/my-files.txt) <(echo "$OTHER_FILES" | sort) || true)
+
+            if [ -n "$OVERLAP" ]; then
+              COUNT=$(echo "$OVERLAP" | grep -c . || echo 0)
+              TITLE=$(gh pr view "$OTHER" --json title --jq '.title')
+              AUTHOR=$(gh pr view "$OTHER" --json author --jq '.author.login')
+              echo "- **PR #$OTHER** ($AUTHOR) — $TITLE" >> "$CONFLICTS_FILE"
+              echo "  Sobrepõe **$COUNT arquivo(s)**:" >> "$CONFLICTS_FILE"
+              echo "$OVERLAP" | head -5 | sed 's/^/    - `/; s/$/`/' >> "$CONFLICTS_FILE"
+              if [ "$COUNT" -gt 5 ]; then
+                echo "    - _... e mais $((COUNT - 5))_" >> "$CONFLICTS_FILE"
+              fi
+            fi
+          done
+
+          if [ ! -s "$CONFLICTS_FILE" ]; then
+            echo "Nenhuma sobreposição detectada com outras PRs."
+            # Remove comment anterior se existir
+            EXISTING=$(gh api "repos/$REPO/issues/$MY_PR/comments" --jq \
+              '.[] | select(.user.login == "github-actions[bot]") | select(.body | contains("Cross-PR Conflict Detector")) | .id' | head -1)
+            if [ -n "$EXISTING" ]; then
+              gh api "repos/$REPO/issues/comments/$EXISTING" -X DELETE
+            fi
+            exit 0
+          fi
+
+          # Constrói comment
+          {
+            echo "## ⚠️ Cross-PR Conflict Detector"
+            echo ""
+            echo "Esta PR sobrepõe arquivos com **$(grep -c '^- ' "$CONFLICTS_FILE") outra(s) PR(s) aberta(s)**. Alinhe ordem de merge pra evitar conflitos:"
+            echo ""
+            cat "$CONFLICTS_FILE"
+            echo ""
+            echo "💡 Sugestões:"
+            echo "- Mergear a PR menor primeiro e rebasear esta"
+            echo "- Coordenar com autor da outra PR"
+            echo "- Considerar se uma das PRs pode aguardar"
+            echo ""
+            echo "_Análise estática — heurístico, não detecta conflitos lógicos. Por \`pr-conflict-detector.yml\`._"
+          } > /tmp/comment.md
+
+          cat /tmp/comment.md
+
+          # Atualiza ou cria comment
+          EXISTING=$(gh api "repos/$REPO/issues/$MY_PR/comments" --jq \
+            '.[] | select(.user.login == "github-actions[bot]") | select(.body | contains("Cross-PR Conflict Detector")) | .id' | head -1)
+
+          if [ -n "$EXISTING" ]; then
+            gh api "repos/$REPO/issues/comments/$EXISTING" -X PATCH \
+              -f body="$(cat /tmp/comment.md)" > /dev/null
+            echo "Comment atualizado."
+          else
+            gh pr comment "$MY_PR" --body-file /tmp/comment.md
+            echo "Comment criado."
+          fi

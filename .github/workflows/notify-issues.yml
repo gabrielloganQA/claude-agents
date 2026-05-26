@@ -1,0 +1,87 @@
+name: Notify Teams — issue aberta por agente
+
+on:
+  issues:
+    types: [opened, labeled]
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    if: |
+      contains(github.event.issue.labels.*.name, 'qa-found') ||
+      contains(github.event.issue.labels.*.name, 'qa-ci') ||
+      contains(github.event.issue.labels.*.name, 'qa-nightly') ||
+      contains(github.event.issue.labels.*.name, 'security') ||
+      contains(github.event.issue.labels.*.name, 'a11y') ||
+      contains(github.event.issue.labels.*.name, 'perf') ||
+      contains(github.event.issue.labels.*.name, 'mutation')
+    steps:
+      - uses: actions/checkout@v6
+
+      # Para o evento "labeled", so notificamos UMA vez por issue:
+      # disparamos no primeiro label-de-interesse adicionado.
+      # No evento "opened" sempre notificamos.
+      - name: Decidir se notifica
+        id: gate
+        env:
+          ACTION: ${{ github.event.action }}
+          LABEL_ADDED: ${{ github.event.label.name }}
+        run: |
+          if [ "$ACTION" = "opened" ]; then
+            echo "notify=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          case "$LABEL_ADDED" in
+            qa-found|qa-ci|qa-nightly|security|a11y|perf|mutation)
+              # so notifica se foi este label que abriu a relevancia
+              # (evita ruido quando triage adiciona priority:high depois)
+              echo "notify=true" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "notify=false" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+      - name: Determinar cor por label
+        id: color
+        if: steps.gate.outputs.notify == 'true'
+        env:
+          LABELS: ${{ toJson(github.event.issue.labels.*.name) }}
+        run: |
+          if echo "$LABELS" | grep -q '"security"'; then
+            echo "color=attention" >> "$GITHUB_OUTPUT"
+            echo "kind=Segurança" >> "$GITHUB_OUTPUT"
+          elif echo "$LABELS" | grep -qE '"(qa-found|qa-ci|qa-nightly)"'; then
+            echo "color=warning" >> "$GITHUB_OUTPUT"
+            echo "kind=QA" >> "$GITHUB_OUTPUT"
+          elif echo "$LABELS" | grep -q '"a11y"'; then
+            echo "color=warning" >> "$GITHUB_OUTPUT"
+            echo "kind=Acessibilidade" >> "$GITHUB_OUTPUT"
+          elif echo "$LABELS" | grep -q '"perf"'; then
+            echo "color=warning" >> "$GITHUB_OUTPUT"
+            echo "kind=Performance" >> "$GITHUB_OUTPUT"
+          elif echo "$LABELS" | grep -q '"mutation"'; then
+            echo "color=accent" >> "$GITHUB_OUTPUT"
+            echo "kind=Mutation" >> "$GITHUB_OUTPUT"
+          else
+            echo "color=accent" >> "$GITHUB_OUTPUT"
+            echo "kind=Issue" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Postar no Teams
+        if: steps.gate.outputs.notify == 'true'
+        env:
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+        run: |
+          ./scripts/notify-teams.sh \
+            --title "[${{ steps.color.outputs.kind }}] Issue #${{ github.event.issue.number }} — ${{ github.event.issue.title }}" \
+            --color "${{ steps.color.outputs.color }}" \
+            --message "Aberta por agente automatizado. Pode ser triada e atribuída a \`/dev-fix\`." \
+            --fact "Autor=${{ github.event.issue.user.login }}" \
+            --fact "Repo=${{ github.repository }}" \
+            --link "${{ github.event.issue.html_url }}" \
+            --link-text "Abrir issue"

@@ -1,0 +1,54 @@
+name: PR Risk Score — comenta score 0-100 na PR
+
+# Calcula risco da PR baseado em métricas estáticas (linhas, arquivos,
+# áreas críticas, ausência de tests) e comenta na PR pra ajudar revisor
+# a priorizar.
+#
+# 100% grátis. Sem LLM.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  score:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Calcular score
+        id: score
+        run: |
+          chmod +x scripts/pr-risk-score.sh
+          bash scripts/pr-risk-score.sh \
+            "${{ github.event.pull_request.base.sha }}" \
+            "${{ github.event.pull_request.head.sha }}" \
+            > /tmp/risk-comment.md
+          cat /tmp/risk-comment.md
+
+      - name: Postar (ou atualizar) comentário
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Procura comentário existente do bot (pra editar em vez de duplicar)
+          EXISTING=$(gh api "repos/$REPO/issues/$PR/comments" --jq \
+            '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("## "))) | select(.body | contains("PR Risk Score")) | .id' | head -1)
+
+          if [ -n "$EXISTING" ]; then
+            echo "Atualizando comment existente $EXISTING"
+            gh api "repos/$REPO/issues/comments/$EXISTING" -X PATCH \
+              -f body="$(cat /tmp/risk-comment.md)" > /dev/null
+          else
+            echo "Criando comment novo"
+            gh pr comment "$PR" --body-file /tmp/risk-comment.md
+          fi

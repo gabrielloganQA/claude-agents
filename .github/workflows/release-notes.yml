@@ -1,0 +1,79 @@
+name: Release notes — gera changelog
+
+# Gera release notes a partir de commits convencionais e:
+# 1. Comenta como preview em PR (se houver PR aberta com label "release")
+# 2. Cria GitHub Release se for disparado com `tag` input
+#
+# 100% grátis — só git log + bash. Sem LLM.
+
+on:
+  workflow_dispatch:
+    inputs:
+      since:
+        description: "Ref inicial (default: última tag, ou HEAD~50 se sem tags)"
+        required: false
+        type: string
+      tag:
+        description: "Tag nova a criar (opcional). Se preenchido, cria Release."
+        required: false
+        type: string
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  generate:
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'release'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Gerar changelog
+        id: gen
+        run: |
+          chmod +x scripts/gen-changelog.sh
+          if [ -n "${{ inputs.since }}" ]; then
+            bash scripts/gen-changelog.sh "${{ inputs.since }}" > /tmp/changelog.md
+          else
+            bash scripts/gen-changelog.sh > /tmp/changelog.md
+          fi
+          {
+            echo 'changelog<<CHANGELOG_EOF'
+            cat /tmp/changelog.md
+            echo 'CHANGELOG_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Imprimir no log
+        run: cat /tmp/changelog.md
+
+      - name: Comentar na PR (se for PR com label release)
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment ${{ github.event.pull_request.number }} --body-file /tmp/changelog.md
+
+      - name: Criar GitHub Release (se tag input passado)
+        if: github.event_name == 'workflow_dispatch' && inputs.tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ inputs.tag }}" \
+            --title "${{ inputs.tag }}" \
+            --notes-file /tmp/changelog.md \
+            --draft
+          echo "Release rascunho criado. Revisar e publicar no GitHub UI."
+
+      - name: Upload como artifact (sempre)
+        uses: actions/upload-artifact@v4
+        with:
+          name: changelog
+          path: /tmp/changelog.md
+          retention-days: 30

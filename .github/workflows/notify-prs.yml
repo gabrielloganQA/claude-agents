@@ -1,0 +1,51 @@
+name: Notify Teams — PR esperando revisão
+
+on:
+  pull_request:
+    types: [opened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    # Drafts nao notificam — so PRs prontas pra review
+    if: github.event.pull_request.draft == false
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Postar no Teams
+        env:
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+        run: |
+          # Detecta se PR veio de agente (autor bot, ou label auto-*)
+          AUTHOR="${{ github.event.pull_request.user.login }}"
+          IS_BOT="${{ github.event.pull_request.user.type }}"
+          LABELS='${{ toJson(github.event.pull_request.labels.*.name) }}'
+
+          KIND="PR"
+          COLOR="accent"
+          if [ "$IS_BOT" = "Bot" ]; then
+            KIND="PR (bot)"
+            COLOR="accent"
+          fi
+          if echo "$LABELS" | grep -q '"auto-update"'; then
+            KIND="Dependabot"
+            COLOR="accent"
+          fi
+          if echo "$LABELS" | grep -q '"security"'; then
+            KIND="PR de segurança"
+            COLOR="attention"
+          fi
+
+          ./scripts/notify-teams.sh \
+            --title "[$KIND] #${{ github.event.pull_request.number }} — ${{ github.event.pull_request.title }}" \
+            --color "$COLOR" \
+            --message "Aberta por \`$AUTHOR\` aguardando revisão de CODEOWNERS." \
+            --fact "Base=${{ github.event.pull_request.base.ref }}" \
+            --fact "Head=${{ github.event.pull_request.head.ref }}" \
+            --fact "Mudanças=+${{ github.event.pull_request.additions }} -${{ github.event.pull_request.deletions }}" \
+            --link "${{ github.event.pull_request.html_url }}" \
+            --link-text "Revisar PR"
