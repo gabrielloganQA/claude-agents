@@ -1,0 +1,110 @@
+name: Demo GIF — gera screencast da app
+
+# Quando uma PR com label `feature` (ou `demo`) é mergeada em main, este
+# workflow:
+# 1. Roda tests/web/demo-recorder.spec.js (Playwright com video gravando)
+# 2. Converte o video webm → GIF de baixo peso (ffmpeg)
+# 3. Anexa o GIF como artifact + comenta na PR linkando-o
+#
+# 100% grátis — ffmpeg vem no runner ubuntu-latest.
+
+on:
+  pull_request:
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number pra comentar o resultado (opcional)"
+        required: false
+
+permissions:
+  contents: read
+  pull-requests: write
+  actions: read
+
+jobs:
+  generate:
+    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.merged == true && (contains(github.event.pull_request.labels.*.name, 'feature') || contains(github.event.pull_request.labels.*.name, 'demo')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: |
+            package-lock.json
+            sample-app/package-lock.json
+
+      - name: Install all
+        run: npm run install:all
+
+      - name: Install ffmpeg
+        run: sudo apt-get install -y ffmpeg
+
+      - name: Build sample-app
+        run: npm --prefix sample-app run build
+
+      - name: Subir dev server
+        run: |
+          mkdir -p /tmp/dev-logs
+          nohup setsid npm --prefix sample-app run dev > /tmp/dev-logs/srv.log 2>&1 < /dev/null &
+          npx wait-on http://localhost:3000 -t 60000
+
+      - name: Rodar demo recorder (Playwright)
+        env:
+          DEMO_RECORD: "1"
+        run: |
+          npx playwright test tests/web/demo-recorder.spec.js --reporter=list || true
+
+      - name: Localizar e converter video pra GIF
+        id: gif
+        run: |
+          VIDEO=$(find test-results -name "*.webm" | head -1)
+          if [ -z "$VIDEO" ]; then
+            echo "::warning::Nenhum video gerado pelo Playwright."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Video encontrado: $VIDEO"
+
+          mkdir -p /tmp/demo
+          # Gera GIF otimizado: 12fps, paleta gerada antes (mais leve, menos cores)
+          ffmpeg -y -i "$VIDEO" -vf "fps=12,scale=640:-1:flags=lanczos,palettegen" /tmp/demo/palette.png 2>&1 | tail -3
+          ffmpeg -y -i "$VIDEO" -i /tmp/demo/palette.png -filter_complex "fps=12,scale=640:-1:flags=lanczos[x];[x][1:v]paletteuse" /tmp/demo/demo.gif 2>&1 | tail -3
+
+          SIZE=$(stat -c%s /tmp/demo/demo.gif | awk '{print int($1/1024)" KB"}')
+          echo "GIF gerado: $SIZE"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "size=$SIZE" >> "$GITHUB_OUTPUT"
+
+      - name: Upload GIF como artifact
+        if: steps.gif.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-gif
+          path: /tmp/demo/demo.gif
+          retention-days: 90
+
+      - name: Comentar na PR com link do artifact
+        if: steps.gif.outputs.skip != 'true' && (github.event.pull_request.number != '' || inputs.pr_number != '')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          REPO: ${{ github.repository }}
+          SIZE: ${{ steps.gif.outputs.size }}
+          RUN: ${{ github.run_id }}
+        run: |
+          gh pr comment "$PR_NUMBER" --body "🎬 **Demo GIF gerado**
+
+          Screencast da app rodando o fluxo principal está disponível como artifact:
+
+          🔗 [demo-gif ($SIZE)](https://github.com/$REPO/actions/runs/$RUN) → Artifacts → \`demo-gif\`
+
+          Pra embedar em README/release notes, baixe o GIF e suba como issue attachment pra obter URL persistente.
+
+          _Gerado por \`demo-gif.yml\` via Playwright + ffmpeg._"

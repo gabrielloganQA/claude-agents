@@ -100,6 +100,25 @@ Destaques:
   - Hotspot principal: {arquivo}
 ```
 
+### 6. Notificar Teams (opcional)
+
+Se a env `TEAMS_WEBHOOK_URL` estiver setada (localmente via `.env` ou `export`), dispare o resumo no canal:
+
+```bash
+./scripts/notify-teams.sh \
+  --title "Retro semanal — $(date -u +%Y-%m-%d)" \
+  --color "accent" \
+  --message "{TL;DR de 1 frase aqui}" \
+  --fact "Bugs achados=N" \
+  --fact "Bugs corrigidos=N" \
+  --fact "MTTR=Hh" \
+  --fact "Saldo backlog=±N" \
+  --link "{URL da issue/discussion da retro}" \
+  --link-text "Ler retro completa"
+```
+
+O script é no-op se `TEAMS_WEBHOOK_URL` não estiver definida — seguro chamar sempre.
+
 ## Princípios
 
 - **Honesto sobre regressão.** Se o backlog cresceu ou MTTR aumentou, diga claramente.

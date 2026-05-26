@@ -1,0 +1,109 @@
+name: Notify Teams (issues) — reusable
+
+# Reusable workflow chamado por outros repos via:
+#
+#   on:
+#     issues:
+#       types: [opened, labeled]
+#   jobs:
+#     notify:
+#       uses: Atlante-TI/claude-agents/.github/workflows/notify-issues-reusable.yml@v1
+#       secrets:
+#         TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+#
+# Dispara quando issue eh aberta ou recebe um label de interesse
+# (qa-found, qa-ci, qa-nightly, security, a11y, perf, mutation).
+
+on:
+  workflow_call:
+    inputs:
+      labels-of-interest:
+        description: 'Labels CSV que disparam notificacao (default cobre os agentes do framework)'
+        required: false
+        type: string
+        default: 'qa-found,qa-ci,qa-nightly,security,a11y,perf,mutation'
+    secrets:
+      TEAMS_WEBHOOK_URL:
+        description: 'Webhook do Teams. Sem ele o workflow eh no-op.'
+        required: false
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout framework (para usar composite action)
+        uses: actions/checkout@v6
+        with:
+          repository: Atlante-TI/claude-agents
+          ref: ${{ github.action_ref || 'main' }}
+          path: _framework
+
+      - name: Decidir se notifica
+        id: gate
+        env:
+          ACTION: ${{ github.event.action }}
+          LABEL_ADDED: ${{ github.event.label.name }}
+          ISSUE_LABELS: ${{ toJson(github.event.issue.labels.*.name) }}
+          LABELS_OF_INTEREST: ${{ inputs.labels-of-interest }}
+        run: |
+          # Converte CSV "a,b,c" em regex "(a|b|c)"
+          REGEX_LABELS=$(echo "$LABELS_OF_INTEREST" | tr ',' '|')
+
+          # Se foi "opened" e qualquer label de interesse JA esta na issue, notifica
+          if [ "$ACTION" = "opened" ]; then
+            if echo "$ISSUE_LABELS" | grep -qE "\"($REGEX_LABELS)\""; then
+              echo "notify=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "notify=false" >> "$GITHUB_OUTPUT"
+            fi
+            exit 0
+          fi
+
+          # Se foi "labeled", so notifica se ESTE label adicionado eh de interesse
+          if echo "$LABEL_ADDED" | grep -qE "^($REGEX_LABELS)$"; then
+            echo "notify=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "notify=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Determinar cor e tipo
+        id: classify
+        if: steps.gate.outputs.notify == 'true'
+        env:
+          LABELS: ${{ toJson(github.event.issue.labels.*.name) }}
+        run: |
+          if echo "$LABELS" | grep -q '"security"'; then
+            echo "color=attention" >> "$GITHUB_OUTPUT"
+            echo "kind=Segurança" >> "$GITHUB_OUTPUT"
+          elif echo "$LABELS" | grep -qE '"(qa-found|qa-ci|qa-nightly)"'; then
+            echo "color=warning" >> "$GITHUB_OUTPUT"
+            echo "kind=QA" >> "$GITHUB_OUTPUT"
+          elif echo "$LABELS" | grep -q '"a11y"'; then
+            echo "color=warning" >> "$GITHUB_OUTPUT"
+            echo "kind=Acessibilidade" >> "$GITHUB_OUTPUT"
+          elif echo "$LABELS" | grep -q '"perf"'; then
+            echo "color=warning" >> "$GITHUB_OUTPUT"
+            echo "kind=Performance" >> "$GITHUB_OUTPUT"
+          elif echo "$LABELS" | grep -q '"mutation"'; then
+            echo "color=accent" >> "$GITHUB_OUTPUT"
+            echo "kind=Mutation" >> "$GITHUB_OUTPUT"
+          else
+            echo "color=accent" >> "$GITHUB_OUTPUT"
+            echo "kind=Issue" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Postar no Teams
+        if: steps.gate.outputs.notify == 'true'
+        uses: ./_framework/.github/actions/notify-teams
+        with:
+          webhook-url: ${{ secrets.TEAMS_WEBHOOK_URL }}
+          title: "[${{ steps.classify.outputs.kind }}] Issue #${{ github.event.issue.number }} — ${{ github.event.issue.title }}"
+          color: ${{ steps.classify.outputs.color }}
+          message: "Aberta por agente automatizado em `${{ github.repository }}`. Pode ser triada e atribuída a `/dev-fix`."
+          facts: "Autor=${{ github.event.issue.user.login }};Repo=${{ github.repository }}"
+          link: ${{ github.event.issue.html_url }}
+          link-text: Abrir issue

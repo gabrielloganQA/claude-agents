@@ -98,6 +98,19 @@ jobs:
           )
           gh issue create --title "$TITLE" --label "bug,qa-nightly" --body "$BODY"
 
+      - name: Notificar Teams se varredura noturna falhou
+        if: steps.suite.outcome == 'failure'
+        env:
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+        run: |
+          ./scripts/notify-teams.sh \
+            --title "QA noturno falhou — ${{ github.repository }}" \
+            --color "attention" \
+            --message "A varredura noturna detectou falha sem mudanças recentes no código. Pode ser regressão de dependência, ambiente ou flakiness." \
+            --fact "Data=$(date -u +%Y-%m-%d)" \
+            --link "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --link-text "Ver run noturno"
+
       - name: Falhar workflow se suite falhou
         if: steps.suite.outcome == 'failure'
         run: exit 1
