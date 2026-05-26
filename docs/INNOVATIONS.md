@@ -156,6 +156,36 @@ Razão: Diff só em API/store — pulando Playwright.
 
 ---
 
+## 7. Notificações no Teams
+
+**Script**: `scripts/notify-teams.sh`
+**Workflows**: `qa.yml`, `qa-nightly.yml` (failure), `notify-issues.yml`, `notify-prs.yml`
+
+Dispara Adaptive Card no canal Teams via webhook do Workflows (Power Automate) — substituto oficial dos antigos Office 365 connectors. Eventos cobertos:
+
+| Evento | Origem |
+|---|---|
+| QA falhou em main | `qa.yml` step "Notificar Teams se falhou" |
+| QA noturno falhou | `qa-nightly.yml` step "Notificar Teams se varredura noturna falhou" |
+| Issue aberta com label de agente (`qa-found`, `qa-ci`, `qa-nightly`, `security`, `a11y`, `perf`, `mutation`) | `notify-issues.yml` |
+| PR aberta esperando review (não-draft) | `notify-prs.yml` |
+| Retrospectiva semanal | agente `retrospective` chama o script no final |
+
+### Setup
+
+1. No Teams, canal alvo → `…` → **Workflows** → template **"Post to a channel when a webhook request is received"** → escolhe team/channel → copia URL gerada.
+2. GitHub → repo → **Settings → Secrets and variables → Actions** → New secret `TEAMS_WEBHOOK_URL`.
+
+Sem o secret os workflows seguem rodando — o script é no-op quando a env não está setada.
+
+### Cores
+
+- 🔴 `attention` — falhas críticas (QA quebrou, security issue)
+- 🟡 `warning` — atenção (qa-found, a11y, perf)
+- 🔵 `accent` — informativo (PR aberta, retro, mutation)
+
+---
+
 ## Resumo das innovations
 
 | # | Feature | Workflow | Trigger | Tempo médio |
@@ -166,6 +196,7 @@ Razão: Diff só em API/store — pulando Playwright.
 | 4 | Conflict Detector | `pr-conflict-detector.yml` | PR open/sync | <30s |
 | 5 | Demo GIF | `demo-gif.yml` | PR merged + label | 3-5min |
 | 6 | Smart Test | `smart-test.yml` | PR open/sync | varia |
+| 7 | Teams notify | `notify-issues/prs.yml` + steps em qa | issue/PR/falha | <10s |
 
 **Custo total**: $0. Tudo no GitHub Actions free tier (público) ou bem dentro da quota (privado).
 

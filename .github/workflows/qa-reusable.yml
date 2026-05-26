@@ -1,0 +1,230 @@
+name: QA — reusable
+
+# Workflow reusable, stack-agnostico. Uso no caller:
+#
+#   on:
+#     push: { branches: [main] }
+#     pull_request: { branches: [main] }
+#   jobs:
+#     qa:
+#       uses: Atlante-TI/claude-agents/.github/workflows/qa-reusable.yml@v1
+#       with:
+#         test-cmd: "npm test"
+#         needs-dev-server: false
+#       secrets:
+#         TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+#
+# Para apps que precisam de dev server (E2E):
+#
+#       with:
+#         install-cmd: "npm install && npx playwright install --with-deps chromium"
+#         build-cmd: "npm run build"
+#         test-cmd: "npm run test:e2e"
+#         needs-dev-server: true
+#         dev-cmd: "npm run dev"
+#         dev-port: "3000"
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: 'Versao do Node'
+        required: false
+        type: string
+        default: '20'
+      working-directory:
+        description: 'Diretorio do app dentro do repo'
+        required: false
+        type: string
+        default: '.'
+      install-cmd:
+        description: 'Comando de install (cobre browsers do Playwright, etc)'
+        required: false
+        type: string
+        default: 'npm install'
+      build-cmd:
+        description: 'Comando de build (deixe vazio pra pular)'
+        required: false
+        type: string
+        default: ''
+      test-cmd:
+        description: 'Comando principal de teste'
+        required: true
+        type: string
+      needs-dev-server:
+        description: 'Subir dev server antes dos testes?'
+        required: false
+        type: boolean
+        default: false
+      dev-cmd:
+        description: 'Comando pra subir dev server (so usado se needs-dev-server=true)'
+        required: false
+        type: string
+        default: 'npm run dev'
+      dev-port:
+        description: 'Porta do dev server pra wait-on'
+        required: false
+        type: string
+        default: '3000'
+      dev-health-path:
+        description: 'Path pra checar saude do dev server (ex: /api/health)'
+        required: false
+        type: string
+        default: '/'
+      open-issue-on-failure:
+        description: 'Abrir issue automaticamente em push pra main quando falhar?'
+        required: false
+        type: boolean
+        default: true
+      issue-labels:
+        description: 'Labels CSV para a issue automatica'
+        required: false
+        type: string
+        default: 'bug,qa-ci'
+    secrets:
+      TEAMS_WEBHOOK_URL:
+        description: 'Webhook Teams. Sem ele a notificacao eh no-op.'
+        required: false
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Checkout framework (para composite actions)
+        uses: actions/checkout@v6
+        with:
+          repository: Atlante-TI/claude-agents
+          ref: ${{ github.action_ref || 'main' }}
+          path: _framework
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: 'npm'
+
+      - name: Install
+        working-directory: ${{ inputs.working-directory }}
+        run: ${{ inputs.install-cmd }}
+
+      - name: Build
+        if: inputs.build-cmd != ''
+        working-directory: ${{ inputs.working-directory }}
+        run: ${{ inputs.build-cmd }}
+
+      - name: Start dev server
+        if: inputs.needs-dev-server
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          DEV_CMD: ${{ inputs.dev-cmd }}
+          DEV_PORT: ${{ inputs.dev-port }}
+          HEALTH_PATH: ${{ inputs.dev-health-path }}
+        run: |
+          mkdir -p /tmp/dev-logs
+          nohup setsid $DEV_CMD > /tmp/dev-logs/server.log 2>&1 < /dev/null &
+          npx wait-on "http://localhost:${DEV_PORT}${HEALTH_PATH}" -t 90000
+          echo "✓ dev server vivo em :$DEV_PORT"
+
+      - name: Run tests
+        id: tests
+        working-directory: ${{ inputs.working-directory }}
+        run: ${{ inputs.test-cmd }}
+        continue-on-error: true
+
+      - name: Tail dev server log (se falhou)
+        if: failure() || steps.tests.outcome == 'failure'
+        run: |
+          if [ -f /tmp/dev-logs/server.log ]; then
+            echo "::group::Dev server log (last 50 lines)"
+            tail -50 /tmp/dev-logs/server.log
+            echo "::endgroup::"
+          fi
+
+      - name: Upload Playwright report (se existir)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: ${{ inputs.working-directory }}/playwright-report/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Upload Cypress artifacts (se existir)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cypress-artifacts
+          path: |
+            ${{ inputs.working-directory }}/cypress/screenshots/
+            ${{ inputs.working-directory }}/cypress/videos/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Garantir labels necessarios
+        if: steps.tests.outcome == 'failure' && github.event_name == 'push' && inputs.open-issue-on-failure
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LABELS_CSV: ${{ inputs.issue-labels }}
+        run: |
+          IFS=',' read -ra LABELS <<< "$LABELS_CSV"
+          for label in "${LABELS[@]}"; do
+            case "$label" in
+              bug)         gh label create "bug" --color "d73a4a" --description "Defeito" 2>/dev/null || true ;;
+              qa-ci)       gh label create "qa-ci" --color "d73a4a" --description "Aberto pelo workflow CI" 2>/dev/null || true ;;
+              qa-found)    gh label create "qa-found" --color "d73a4a" --description "Aberto pelo agente qa-tester" 2>/dev/null || true ;;
+              qa-nightly)  gh label create "qa-nightly" --color "d73a4a" --description "Aberto pela varredura noturna" 2>/dev/null || true ;;
+            esac
+          done
+
+      - name: Abrir issue se push falhou em main
+        if: steps.tests.outcome == 'failure' && github.event_name == 'push' && inputs.open-issue-on-failure
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LABELS: ${{ inputs.issue-labels }}
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          TITLE="[QA-CI] Suite falhou em ${SHORT_SHA} ($(date -u +%Y-%m-%d))"
+          BODY=$(cat <<EOF
+          ## Resumo
+          A suite de testes falhou no commit \`${{ github.sha }}\` da branch \`${{ github.ref_name }}\`.
+
+          - Workflow run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          - Comando: \`${{ inputs.test-cmd }}\`
+
+          ## Proximos passos
+          Time pode rodar \`/dev-fix\` no Claude Code pra investigar.
+
+          _Aberta automaticamente pelo workflow reusable \`qa-reusable.yml\`._
+          EOF
+          )
+          # Dedup por SHA
+          if gh issue list --label "${LABELS%%,*}" --search "${SHORT_SHA} in:title" --state open --json number --jq "length" | grep -q "^0$"; then
+            gh issue create --title "$TITLE" --label "${LABELS}" --body "$BODY"
+          else
+            echo "Issue para ${SHORT_SHA} ja existe — nao duplicando."
+          fi
+
+      - name: Notificar Teams se falhou (push apenas)
+        if: steps.tests.outcome == 'failure' && github.event_name == 'push'
+        uses: ./_framework/.github/actions/notify-teams
+        with:
+          webhook-url: ${{ secrets.TEAMS_WEBHOOK_URL }}
+          title: "QA falhou em ${{ github.repository }}"
+          color: attention
+          message: "A suite quebrou no commit `${{ github.sha }}` da branch `${{ github.ref_name }}`."
+          facts: "Comando=${{ inputs.test-cmd }};Branch=${{ github.ref_name }}"
+          link: "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          link-text: Ver run
+
+      - name: Falhar workflow se testes falharam
+        if: steps.tests.outcome == 'failure'
+        run: exit 1

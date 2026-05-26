@@ -1,0 +1,106 @@
+name: Notify Teams
+description: |
+  Posta Adaptive Card no canal Teams via webhook do Workflows (Power Automate).
+  No-op se webhook-url for vazio — seguro chamar em workflows sem secret configurado.
+
+inputs:
+  webhook-url:
+    description: URL do webhook do Teams (geralmente vinda de secret)
+    required: true
+  title:
+    description: Título do card (em negrito, destaque)
+    required: true
+  message:
+    description: Corpo do card (texto principal)
+    required: true
+  color:
+    description: "Cor do título: good | warning | attention | accent | default"
+    required: false
+    default: accent
+  link:
+    description: URL opcional pro botão de ação
+    required: false
+    default: ""
+  link-text:
+    description: Texto do botão de ação
+    required: false
+    default: Abrir
+  facts:
+    description: 'Pares "chave=valor" separados por ";" (ex: "Branch=main;Autor=fulano")'
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Postar Adaptive Card no Teams
+      shell: bash
+      env:
+        TEAMS_WEBHOOK_URL: ${{ inputs.webhook-url }}
+        TITLE: ${{ inputs.title }}
+        MESSAGE: ${{ inputs.message }}
+        COLOR: ${{ inputs.color }}
+        LINK: ${{ inputs.link }}
+        LINK_TEXT: ${{ inputs.link-text }}
+        FACTS: ${{ inputs.facts }}
+      run: |
+        set -euo pipefail
+
+        if [[ -z "${TEAMS_WEBHOOK_URL}" ]]; then
+          echo "notify-teams: webhook-url vazio — pulando notificacao."
+          exit 0
+        fi
+
+        # Monta facts JSON a partir de "k1=v1;k2=v2"
+        FACTS_JSON="[]"
+        if [[ -n "${FACTS}" ]]; then
+          IFS=';' read -ra PAIRS <<< "${FACTS}"
+          for kv in "${PAIRS[@]}"; do
+            k="${kv%%=*}"
+            v="${kv#*=}"
+            FACTS_JSON=$(jq --arg t "$k" --arg v "$v" '. + [{"title":$t,"value":$v}]' <<<"$FACTS_JSON")
+          done
+        fi
+
+        # Monta actions JSON se link foi passado
+        ACTIONS_JSON="[]"
+        if [[ -n "${LINK}" ]]; then
+          ACTIONS_JSON=$(jq -n --arg t "$LINK_TEXT" --arg u "$LINK" \
+            '[{"type":"Action.OpenUrl","title":$t,"url":$u}]')
+        fi
+
+        PAYLOAD=$(jq -n \
+          --arg title "$TITLE" \
+          --arg message "$MESSAGE" \
+          --arg color "$COLOR" \
+          --argjson facts "$FACTS_JSON" \
+          --argjson actions "$ACTIONS_JSON" \
+          '{
+            type: "message",
+            attachments: [{
+              contentType: "application/vnd.microsoft.card.adaptive",
+              content: {
+                "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                type: "AdaptiveCard",
+                version: "1.4",
+                body: ([
+                  { type: "TextBlock", text: $title, weight: "Bolder", size: "Medium", color: $color, wrap: true },
+                  { type: "TextBlock", text: $message, wrap: true }
+                ] + (if ($facts | length) > 0 then [{ type: "FactSet", facts: $facts }] else [] end)),
+                actions: $actions
+              }
+            }]
+          }')
+
+        HTTP_CODE=$(curl -sS -o /tmp/notify-teams.out -w "%{http_code}" \
+          -H "Content-Type: application/json" \
+          -X POST -d "$PAYLOAD" \
+          "$TEAMS_WEBHOOK_URL" || echo "000")
+
+        if [[ "$HTTP_CODE" =~ ^2 ]]; then
+          echo "notify-teams: enviado ($HTTP_CODE)"
+        else
+          echo "notify-teams: FALHOU ($HTTP_CODE) — resposta:" >&2
+          cat /tmp/notify-teams.out >&2 || true
+          # Nao propaga falha pra nao quebrar workflow principal
+        fi
