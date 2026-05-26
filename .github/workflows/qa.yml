@@ -146,7 +146,7 @@ jobs:
         env:
           TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
         run: |
-          ./scripts/notify-teams.sh \
+          bash scripts/notify-teams.sh \
             --title "QA falhou em ${{ github.repository }}" \
             --color "attention" \
             --message "A suite quebrou no commit \`$(echo ${{ github.sha }} | cut -c1-7)\` da branch \`${{ github.ref_name }}\`." \

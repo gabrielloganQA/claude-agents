@@ -77,7 +77,7 @@ jobs:
         env:
           TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
         run: |
-          ./scripts/notify-teams.sh \
+          bash scripts/notify-teams.sh \
             --title "[${{ steps.color.outputs.kind }}] Issue #${{ github.event.issue.number }} — ${{ github.event.issue.title }}" \
             --color "${{ steps.color.outputs.color }}" \
             --message "Aberta por agente automatizado. Pode ser triada e atribuída a \`/dev-fix\`." \

@@ -7,7 +7,7 @@ name: QA — reusable
 #     pull_request: { branches: [main] }
 #   jobs:
 #     qa:
-#       uses: Atlante-TI/claude-agents/.github/workflows/qa-reusable.yml@v1
+#       uses: gabrielloganQA/claude-agents/.github/workflows/qa-reusable.yml@v1
 #       with:
 #         test-cmd: "npm test"
 #         needs-dev-server: false
@@ -102,7 +102,7 @@ jobs:
       - name: Checkout framework (para composite actions)
         uses: actions/checkout@v6
         with:
-          repository: Atlante-TI/claude-agents
+          repository: gabrielloganQA/claude-agents
           ref: ${{ github.action_ref || 'main' }}
           path: _framework
 

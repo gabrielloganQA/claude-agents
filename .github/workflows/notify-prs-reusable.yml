@@ -7,7 +7,7 @@ name: Notify Teams (PRs) — reusable
 #       types: [opened, ready_for_review]
 #   jobs:
 #     notify:
-#       uses: Atlante-TI/claude-agents/.github/workflows/notify-prs-reusable.yml@v1
+#       uses: gabrielloganQA/claude-agents/.github/workflows/notify-prs-reusable.yml@v1
 #       secrets:
 #         TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
 
@@ -31,7 +31,7 @@ jobs:
       - name: Checkout framework
         uses: actions/checkout@v6
         with:
-          repository: Atlante-TI/claude-agents
+          repository: gabrielloganQA/claude-agents
           ref: ${{ github.action_ref || 'main' }}
           path: _framework
 

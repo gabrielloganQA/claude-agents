@@ -103,7 +103,7 @@ jobs:
         env:
           TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
         run: |
-          ./scripts/notify-teams.sh \
+          bash scripts/notify-teams.sh \
             --title "QA noturno falhou — ${{ github.repository }}" \
             --color "attention" \
             --message "A varredura noturna detectou falha sem mudanças recentes no código. Pode ser regressão de dependência, ambiente ou flakiness." \
