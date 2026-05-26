@@ -220,6 +220,16 @@ echo "  .github/workflows/notify-issues.yml"
 echo "  .github/workflows/notify-prs.yml"
 echo "  .claude/agents.config.json"
 echo ""
+echo "Agentes Claude Code que SERAO baixados em .claude/agents/ (so se nao existirem):"
+echo "  qa-tester, qa-explorer, qa-pre-pr, dev-fixer, dep-updater,"
+echo "  security-scanner, a11y-checker, perf-regression, coverage-auditor,"
+echo "  mutation-tester, docs-writer, triage-bot, retrospective"
+echo ""
+echo "Slash commands que SERAO baixados em .claude/commands/ (so se nao existirem):"
+echo "  /qa-run, /qa-explore, /qa-pre-pr, /qa-tudo, /pre-pr-check, /dev-fix,"
+echo "  /dispatch, /triage, /retro, /verify, /security-scan, /a11y-check,"
+echo "  /perf-check, /coverage-audit, /mutation-test, /dep-review, /docs-update"
+echo ""
 echo "Labels que SERAO criadas no GitHub (idempotente):"
 echo "  bug, qa-found, qa-ci, security, a11y, perf, mutation, triaged,"
 echo "  priority:high, priority:medium, priority:low, auto-update"
@@ -242,6 +252,55 @@ write_if_absent ".github/workflows/qa.yml" "$QA_WORKFLOW" || true
 write_if_absent ".github/workflows/notify-issues.yml" "$NOTIFY_ISSUES" || true
 write_if_absent ".github/workflows/notify-prs.yml" "$NOTIFY_PRS" || true
 write_if_absent ".claude/agents.config.json" "$AGENTS_CONFIG" || true
+
+# ---- agentes e commands via sparse-checkout ----
+log "Baixando agentes e slash commands do framework (sparse-checkout)..."
+TMP_FRAMEWORK=$(mktemp -d)
+trap 'rm -rf "$TMP_FRAMEWORK"' EXIT
+
+if ! git clone --quiet --depth=1 --filter=tree:0 --sparse \
+       --branch "$FRAMEWORK_REF" \
+       "https://github.com/${FRAMEWORK_OWNER}/${FRAMEWORK_REPO}.git" \
+       "$TMP_FRAMEWORK" 2>/dev/null; then
+  warn "Nao consegui clonar ${FRAMEWORK_OWNER}/${FRAMEWORK_REPO}@${FRAMEWORK_REF}."
+  warn "Agentes e commands NAO foram baixados. Verifique acesso ao repo."
+else
+  git -C "$TMP_FRAMEWORK" sparse-checkout set .claude/agents .claude/commands >/dev/null 2>&1
+
+  copied_agents=0
+  skipped_agents=0
+  if [[ -d "$TMP_FRAMEWORK/.claude/agents" ]]; then
+    mkdir -p .claude/agents
+    for src in "$TMP_FRAMEWORK"/.claude/agents/*.md; do
+      [[ -f "$src" ]] || continue
+      dst=".claude/agents/$(basename "$src")"
+      if [[ -f "$dst" ]]; then
+        skipped_agents=$((skipped_agents + 1))
+      else
+        cp "$src" "$dst"
+        copied_agents=$((copied_agents + 1))
+      fi
+    done
+    ok "Agentes: $copied_agents copiados, $skipped_agents pulados (ja existiam)"
+  fi
+
+  copied_cmds=0
+  skipped_cmds=0
+  if [[ -d "$TMP_FRAMEWORK/.claude/commands" ]]; then
+    mkdir -p .claude/commands
+    for src in "$TMP_FRAMEWORK"/.claude/commands/*.md; do
+      [[ -f "$src" ]] || continue
+      dst=".claude/commands/$(basename "$src")"
+      if [[ -f "$dst" ]]; then
+        skipped_cmds=$((skipped_cmds + 1))
+      else
+        cp "$src" "$dst"
+        copied_cmds=$((copied_cmds + 1))
+      fi
+    done
+    ok "Commands: $copied_cmds copiados, $skipped_cmds pulados (ja existiam)"
+  fi
+fi
 
 # Labels
 log "Criando labels no GitHub..."
@@ -281,10 +340,16 @@ echo ""
 ok "Instalacao completa em $REPO_FULL"
 echo ""
 log "Proximos passos:"
-echo "  1. Revisar os 4 arquivos criados:"
-echo "     git diff --cached || git status"
-echo "  2. Commitar e abrir PR:"
-echo "     git add .github/workflows/qa.yml .github/workflows/notify-issues.yml .github/workflows/notify-prs.yml .claude/agents.config.json"
+echo "  1. Revisar os arquivos criados:"
+echo "     git status -- .github/workflows .claude/"
+echo "  2. Commitar (stage apenas o que voce quer publicar):"
+echo "     git add .github/workflows/qa.yml \\"
+echo "             .github/workflows/notify-issues.yml \\"
+echo "             .github/workflows/notify-prs.yml \\"
+echo "             .claude/agents.config.json \\"
+echo "             .claude/agents/ \\"
+echo "             .claude/commands/"
 echo "     git commit -m 'ci: integra claude-agents framework'"
 echo "  3. Configurar TEAMS_WEBHOOK_URL se ainda nao foi."
 echo "  4. Push e o primeiro CI rodara via reusable workflows."
+echo "  5. Use slash commands no Claude Code: /qa-run, /dispatch, /retro, /dev-fix N"
