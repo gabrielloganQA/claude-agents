@@ -8,10 +8,7 @@ export async function GET() {
 export async function POST(req) {
   const contentType = req.headers.get("content-type") || "";
   if (!contentType.includes("application/json")) {
-    return NextResponse.json(
-      { error: "Content-Type deve ser application/json" },
-      { status: 415 }
-    );
+    return NextResponse.json({ error: "Content-Type deve ser application/json" }, { status: 415 });
   }
   const body = await req.json().catch(() => ({}));
   const text = body?.text;
