@@ -76,7 +76,11 @@ export default function Home() {
         </button>
       </form>
 
-      {error && <p style={{ color: "crimson" }} role="alert">{error}</p>}
+      {error && (
+        <p style={{ color: "crimson" }} role="alert">
+          {error}
+        </p>
+      )}
       {initialLoading ? (
         <p>Carregando...</p>
       ) : (
