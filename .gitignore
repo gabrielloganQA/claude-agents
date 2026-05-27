@@ -13,6 +13,7 @@ mutation-report/
 .env
 .env.local
 .env*.local
+tests/.auth/
 *.log
 .DS_Store
 .claude/settings.local.json
